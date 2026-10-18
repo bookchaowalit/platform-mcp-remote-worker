@@ -72,6 +72,61 @@ class ConfigurationTests(unittest.TestCase):
         self.assertNotIn("unit-test-private-credential", json.dumps(payload))
         self.assertEqual(set(payload), {"MCP_TOKEN_SHA256"})
 
+    def test_owner_mcp_token_is_forwarded_only_when_infisical_has_it(self):
+        requested = []
+
+        def secret(name, path, required=False):
+            requested.append((name, path))
+            if name == "SOLO_MCP_REMOTE_TOKEN":
+                return "unit-test-private-credential"
+            if name == "EMPIRE_AUTOMATION_TOKEN_OWNER_MCP":
+                return "unit-test-owner-mcp-jwt"
+            return None
+
+        with patch.object(manage, "resolve", side_effect=secret):
+            payload = manage.worker_secrets()
+        self.assertIn(
+            ("EMPIRE_AUTOMATION_TOKEN_OWNER_MCP", "/empire-platform"), requested
+        )
+        self.assertEqual(payload["EMPIRE_OWNER_MCP_TOKEN"], "unit-test-owner-mcp-jwt")
+        self.assertEqual(set(payload), {"MCP_TOKEN_SHA256", "EMPIRE_OWNER_MCP_TOKEN"})
+
+    def test_deploy_skips_owner_mcp_token_when_absent_and_never_prints_values(self):
+        def secret(name, path, required=False):
+            if name == "SOLO_MCP_REMOTE_TOKEN":
+                return "unit-test-private-credential"
+            if name in ("CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"):
+                return "unit-test-cloudflare-" + name.lower()
+            return None
+
+        runs = []
+
+        def fake_command(args, **kwargs):
+            runs.append((args, kwargs.get("input")))
+            return manage.subprocess.CompletedProcess(args, 0, "", "")
+
+        with tempfile.TemporaryDirectory() as directory:
+            wrangler = Path(directory) / "node_modules/wrangler/bin/wrangler.js"
+            wrangler.parent.mkdir(parents=True)
+            wrangler.write_text("")
+            out = io.StringIO()
+            with (
+                patch.object(manage, "HERE", Path(directory)),
+                patch.object(manage, "resolve", side_effect=secret),
+                patch.object(
+                    manage, "public_origin", return_value="https://mcp.example.com"
+                ),
+                patch.object(manage, "fixed_command", side_effect=fake_command),
+                patch("sys.stdout", out),
+            ):
+                manage.deploy()
+        bulk = json.loads(runs[1][1])
+        self.assertNotIn("EMPIRE_OWNER_MCP_TOKEN", bulk)
+        self.assertEqual(set(bulk), {"MCP_TOKEN_SHA256"})
+        printed = out.getvalue()
+        self.assertNotIn("unit-test", printed)
+        self.assertEqual(json.loads(printed)["secret_names"], ["MCP_TOKEN_SHA256"])
+
     def test_provider_command_output_is_never_exposed_on_failure(self):
         failure = manage.subprocess.CompletedProcess(
             ["test"], 1, "private-value", "private-error"

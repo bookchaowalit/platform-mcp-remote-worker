@@ -195,6 +195,11 @@ def worker_secrets() -> dict[str, str]:
         value = resolve(key, path)
         if value:
             values[binding] = value
+    # The tool hub's delegated cell token is optional here: a hosted weekly
+    # rotation job pushes it too. Deploy only forwards it when Infisical has it.
+    owner_mcp = resolve("EMPIRE_AUTOMATION_TOKEN_OWNER_MCP", "/empire-platform")
+    if owner_mcp:
+        values["EMPIRE_OWNER_MCP_TOKEN"] = owner_mcp
     return values
 
 
