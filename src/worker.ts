@@ -291,7 +291,8 @@ async function describeCell(name: string, cells: Cells, fetcher: Fetcher, secret
   let cache = describeCache.get(fetcher);
   if (!cache) { cache = new Map(); describeCache.set(fetcher, cache); }
   const hit = cache.get(origin);
-  if (hit && hit.expires > Date.now()) return { ...hit.result, cached: true };
+  // Cached per origin; the caller's cell name is set on every hit (aliases may share an origin).
+  if (hit && hit.expires > Date.now()) return { ...hit.result, cell: name, cached: true };
   let signal: AbortSignal | undefined;
   try {
     return await withDeadline(async deadline => {

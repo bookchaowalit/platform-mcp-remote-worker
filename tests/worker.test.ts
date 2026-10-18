@@ -410,6 +410,9 @@ test('describe_cell returns compact callable operations and caches per isolate',
   assert.equal(seen.length, 1);
   await call('describe_cell', hub, upstream, { cell: 'tax' });
   assert.equal(seen.length, 2);
+  const alias = await call('describe_cell', { ...hub, CELLS: JSON.stringify({ ...wranglerCells, 'goals-alias': goals }) }, upstream, { cell: 'goals-alias' });
+  assert.equal(alias.structuredContent?.cell, 'goals-alias');
+  assert.equal(alias.structuredContent?.cached, true);
 });
 
 test('describe_cell scrubs secrets before clipping OpenAPI strings', async () => {

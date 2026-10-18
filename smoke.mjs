@@ -5,13 +5,19 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
 const expected = ['list_remote_services', 'check_remote_services', 'get_ai_status', 'get_agency_workspace', 'get_income_workspace'].sort();
+// Tool hub tools; only the metadata tool list_cells is called here.
+const hubTools = ['list_cells', 'describe_cell', 'call_cell'];
 async function verify(transport) {
   const client = new Client({ name: 'remote-mcp-smoke', version: '1.0.0' });
   try {
     await client.connect(transport, { timeout: 60_000 });
     const tools = await client.listTools(undefined, { timeout: 30_000 });
-    assert.deepEqual(tools.tools.map(tool => tool.name).sort(), expected);
+    assert.deepEqual(tools.tools.map(tool => tool.name).sort(), [...expected, ...hubTools].sort());
     const checks = {};
+    const cells = await client.callTool({ name: 'list_cells', arguments: {} }, undefined, { timeout: 30_000 });
+    const hub = cells.structuredContent || JSON.parse(cells.content[0].text);
+    assert.ok(hub.cells.length > 0 && hub.rejected.length === 0);
+    checks.list_cells = { cells: hub.cells.length, token_configured: hub.token_configured, read_only: hub.read_only };
     for (const name of expected) {
       const result = await client.callTool({ name, arguments: {} }, undefined, { timeout: 30_000 });
       const data = result.structuredContent || JSON.parse(result.content[0].text);
@@ -30,7 +36,7 @@ async function main() {
     const env = Object.fromEntries(Object.entries(process.env).filter(([key, value]) => key !== 'SOLO_MCP_BRIDGE_TOKEN' && value !== undefined));
     const transport = new StdioClientTransport({ command: process.env.MCP_BRIDGE_PYTHON || 'python3', args: [new URL('./launch.py', import.meta.url).pathname], env, stderr: 'pipe' });
     const checks = await verify(transport);
-    console.log(JSON.stringify({ transport: 'fresh_client_bridge', status: 'passed', tools: expected.length, checks }));
+    console.log(JSON.stringify({ transport: 'fresh_client_bridge', status: 'passed', tools: expected.length + hubTools.length, checks }));
     return;
   }
   assert.ok(endpoint?.startsWith('https://'));
@@ -41,7 +47,7 @@ async function main() {
     const transport = new StreamableHTTPClientTransport(new URL(endpoint), { requestInit: { headers, redirect: 'error' } });
     const checks = await verify(transport);
     assert.equal(transport.sessionId, undefined);
-    console.log(JSON.stringify({ transport: 'https', fresh_client: index + 1, status: 'passed', unauthorized_status: noAuth.status, tools: expected.length, checks }));
+    console.log(JSON.stringify({ transport: 'https', fresh_client: index + 1, status: 'passed', unauthorized_status: noAuth.status, tools: expected.length + hubTools.length, checks }));
   }
 }
 main().catch(() => { console.error(JSON.stringify({ status: 'failed', error: 'remote_mcp_verification_failed' })); process.exitCode = 1; });
