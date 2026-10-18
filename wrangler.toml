@@ -11,3 +11,39 @@ AI_API_ORIGIN = "https://api.bookchaowalit.com"
 AGENCY_CRM_ORIGIN = "https://crm-api-production-a7e0.up.railway.app"
 INCOME_CRM_ORIGIN = "https://crm-api-production-19fd.up.railway.app"
 ALLOWED_ORIGINS = ""
+# Tool hub: every own Solo Empire cell (tasks = platform-empire tasks-api).
+# Hosts must also be in CELL_HOSTS (src/worker.ts); others are rejected.
+# Client systems are not listed. Set MCP_READONLY = "1" to allow GET only.
+MCP_READONLY = ""
+CELLS = '''
+{
+  "accounts": "https://accounts-api-production-cfee.up.railway.app",
+  "automation": "https://automation-api-production-af8e.up.railway.app",
+  "budgets": "https://budgets-api-production-690e.up.railway.app",
+  "business-assets": "https://business-assets-api-production.up.railway.app",
+  "cash-flow": "https://cash-flow-api-production.up.railway.app",
+  "content": "https://content-api-production-bca7.up.railway.app",
+  "decisions": "https://decisions-api-production-1ef5.up.railway.app",
+  "diary": "https://diary-api-production-2db8.up.railway.app",
+  "finance-accounts": "https://finance-accounts-api-production.up.railway.app",
+  "goals": "https://goals-api-production-c16e.up.railway.app",
+  "habits": "https://habits-api-production-e516.up.railway.app",
+  "health": "https://health-api-production-c72f.up.railway.app",
+  "intake": "https://intake-api-production.up.railway.app",
+  "investments": "https://investments-api-production.up.railway.app",
+  "learning": "https://learning-api-production-3cee.up.railway.app",
+  "liabilities": "https://liabilities-api-production.up.railway.app",
+  "notifications": "https://notifications-api-production-c9d8.up.railway.app",
+  "operating": "https://operating-api-production.up.railway.app",
+  "opportunities": "https://opportunities-api-production.up.railway.app",
+  "projects": "https://projects-api-production-f4eb.up.railway.app",
+  "radar": "https://radar-api-production-7fe7.up.railway.app",
+  "reconciliations": "https://reconciliations-api-production.up.railway.app",
+  "roles-skills": "https://roles-skills-api-production.up.railway.app",
+  "subscriptions": "https://subscriptions-api-production-b1d4.up.railway.app",
+  "tasks": "https://tasks-api-production-4785.up.railway.app",
+  "tax": "https://tax-api-production-57f6.up.railway.app",
+  "time": "https://time-api-production-2050.up.railway.app",
+  "transactions": "https://transactions-api-production-4078.up.railway.app"
+}
+'''
