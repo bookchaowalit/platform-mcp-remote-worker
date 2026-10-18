@@ -70,15 +70,23 @@ async function boundedText(body: ReadableStream<Uint8Array> | null, limit: numbe
   return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
 }
 
+function scrubText(value: string, secrets: string[]): string {
+  for (const secret of secrets) value = value.split(secret).join('[redacted]');
+  return value;
+}
+// Replaces secret values in every string and property name, without key-based redaction.
+function scrub(value: unknown, secrets: string[]): unknown {
+  if (typeof value === 'string') return scrubText(value, secrets);
+  if (Array.isArray(value)) return value.map(item => scrub(item, secrets));
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [scrubText(key, secrets), scrub(item, secrets)]));
+  return value;
+}
 function redact(value: unknown, secrets: string[]): unknown {
-  if (typeof value === 'string') {
-    for (const secret of secrets) value = (value as string).split(secret).join('[redacted]');
-    return value;
-  }
+  if (typeof value === 'string') return scrubText(value, secrets);
   if (Array.isArray(value)) return value.map(item => redact(item, secrets));
   if (value && typeof value === 'object') {
     return Object.fromEntries(Object.entries(value).map(([key, item]) =>
-      [key, /(?:token|password|secret|authorization|cookie|api[_-]?key|credential)/i.test(key) ? '[redacted]' : redact(item, secrets)]));
+      [scrubText(key, secrets), /(?:token|password|secret|authorization|cookie|api[_-]?key|credential)/i.test(key) ? '[redacted]' : redact(item, secrets)]));
   }
   return value;
 }
@@ -214,7 +222,9 @@ function fitResponse(data: unknown, secrets: string[]): Result {
       if (jsonSize(shortened) <= CELL_RESPONSE_LIMIT) return { data: shortened, truncated: true, truncated_field: listKey, items_returned: kept.length, items_total: items.length };
     }
   }
-  return { truncated: true, preview: dropSecretPrefix(JSON.stringify(data).slice(0, CELL_RESPONSE_LIMIT / 2), secrets) };
+  // Budget in UTF-8 bytes; a split trailing character decodes as U+FFFD.
+  const head = new TextEncoder().encode(JSON.stringify(data)).subarray(0, CELL_RESPONSE_LIMIT / 2);
+  return { truncated: true, preview: dropSecretPrefix(new TextDecoder().decode(head), secrets) };
 }
 
 async function withDeadline<T>(run: (signal: AbortSignal) => Promise<T>): Promise<T> {
@@ -291,7 +301,8 @@ async function describeCell(name: string, cells: Cells, fetcher: Fetcher, secret
         await response.body?.cancel();
         return { cell: name, status: response.ok ? 'invalid_response' : 'http_error', http_status: response.status };
       }
-      const { operations, omitted } = compactOperations(JSON.parse(await boundedText(response.body, OPENAPI_LIMIT)));
+      // Scrub secrets before compaction so clipped summaries cannot keep a partial secret.
+      const { operations, omitted } = compactOperations(scrub(JSON.parse(await boundedText(response.body, OPENAPI_LIMIT)), secrets));
       const kept: Operation[] = [];
       let size = 0;
       for (const operation of operations) {

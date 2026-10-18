@@ -331,6 +331,11 @@ test('call_cell reports cell errors, truncates large bodies and sanitizes failur
   assert.equal(blob.structuredContent?.truncated, true);
   assert.equal(typeof blob.structuredContent?.preview, 'string');
   for (const secret of [ownerToken, 'private-pass']) assert.equal(JSON.stringify(blob).includes(secret), false, secret);
+  const keyed = await invoke({ cell: 'goals', method: 'GET', path: '/v1/goals' }, hub, recorder(() => Response.json({ [ownerToken]: 1, list: [{ [`k-${ownerToken}`]: 'v' }] })).upstream);
+  assert.equal(JSON.stringify(keyed).includes(ownerToken), false);
+  const thai = await invoke({ cell: 'goals', method: 'GET', path: '/v1/goals' }, hub, recorder(() => Response.json({ note: 'ไทย'.repeat(60 * 1024) })).upstream);
+  assert.equal(thai.structuredContent?.truncated, true);
+  assert.ok(new TextEncoder().encode(JSON.stringify(thai.structuredContent)).byteLength <= 100 * 1024);
   const huge = await invoke({ cell: 'goals', method: 'GET', path: '/v1/goals' }, hub, recorder(() => Response.json({ x: 'z'.repeat(3 * 1024 * 1024) })).upstream);
   assert.equal(huge.structuredContent?.status, 'response_too_large');
   const empty = await invoke({ cell: 'goals', method: 'PATCH', path: '/v1/goals/1', body: { title: 'y' } }, hub, recorder(() => new Response(null, { status: 204 })).upstream);
@@ -405,6 +410,13 @@ test('describe_cell returns compact callable operations and caches per isolate',
   assert.equal(seen.length, 1);
   await call('describe_cell', hub, upstream, { cell: 'tax' });
   assert.equal(seen.length, 2);
+});
+
+test('describe_cell scrubs secrets before clipping OpenAPI strings', async () => {
+  const longToken = `owner-${'t'.repeat(400)}`;
+  const spec = { paths: { [`/v1/x-${longToken}`]: { get: { summary: `see ${longToken}`, parameters: [{ name: `q${longToken}`, in: 'query' }] } } } };
+  const result = await call('describe_cell', { ...hub, EMPIRE_OWNER_MCP_TOKEN: longToken }, recorder(() => Response.json(spec)).upstream, { cell: 'goals' });
+  assert.equal(JSON.stringify(result).includes('t'.repeat(40)), false);
 });
 
 test('describe_cell caps output size and reports unknown cells and upstream errors', async () => {
