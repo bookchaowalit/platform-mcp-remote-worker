@@ -90,7 +90,7 @@ test('real SDK initializes, lists the five read-only tools plus the cell hub, an
       assert.deepEqual(result.tools.map(tool => tool.name).sort(), ['list_remote_services', 'check_remote_services', 'get_ai_status', 'get_agency_workspace', 'get_income_workspace', 'list_cells', 'describe_cell', 'call_cell'].sort());
       for (const tool of result.tools) {
         assert.equal(tool.annotations?.readOnlyHint, tool.name !== 'call_cell');
-        assert.equal(tool.annotations?.destructiveHint, false);
+        assert.equal(tool.annotations?.destructiveHint, tool.name === 'call_cell');
       }
       const method = (result.tools.find(tool => tool.name === 'call_cell')?.inputSchema.properties as Record<string, { enum?: string[] }>).method;
       assert.deepEqual(method.enum, ['GET', 'POST', 'PATCH', 'PUT']);
@@ -314,13 +314,25 @@ test('call_cell reports cell errors, truncates large bodies and sanitizes failur
   assert.equal(invalid.structuredContent?.status, 'http_error');
   assert.equal(invalid.structuredContent?.http_status, 422);
   assert.ok(JSON.stringify(invalid.structuredContent?.data).includes('field required'));
-  const large = recorder(() => Response.json({ items: 'x'.repeat(200 * 1024), tail: ownerToken }));
-  const truncated = await invoke({ cell: 'goals', method: 'GET', path: '/v1/goals' }, hub, large.upstream);
-  assert.equal(truncated.structuredContent?.truncated, true);
-  assert.ok(String(truncated.structuredContent?.preview).length <= 100 * 1024);
-  const cutToken = recorder(() => new Response(`{"x":"${'y'.repeat(100 * 1024 - 14)}${ownerToken}"}`, { headers: { 'Content-Type': 'application/json' } }));
-  const cut = await invoke({ cell: 'goals', method: 'GET', path: '/v1/goals' }, hub, cutToken.upstream);
-  assert.equal(String(cut.structuredContent?.preview).endsWith(ownerToken.slice(0, 7)), false);
+  const rows = Array.from({ length: 3000 }, (_, index) => ({ id: index, note: 'n'.repeat(60), authorization: `Bearer ${ownerToken}`, password: 'private-pass' }));
+  for (const [reply, field] of [[{ items: rows, total: 3000 }, 'items'], [rows, undefined]] as const) {
+    const big = await invoke({ cell: 'goals', method: 'GET', path: '/v1/goals' }, hub, recorder(() => Response.json(reply)).upstream);
+    const out = big.structuredContent!;
+    assert.equal(out.status, 'ok');
+    assert.equal(out.truncated, true);
+    assert.equal(out.truncated_field, field);
+    assert.equal(out.items_total, 3000);
+    assert.ok((out.items_returned as number) > 0 && (out.items_returned as number) < 3000);
+    assert.ok(JSON.stringify(out).length <= 110 * 1024);
+    for (const secret of [ownerToken, 'private-pass', 'Bearer']) assert.equal(JSON.stringify(big).includes(secret), false, secret);
+  }
+  const blob = await invoke({ cell: 'goals', method: 'GET', path: '/v1/goals' }, hub, recorder(() => new Response(
+    `{"password":"private-pass","note":"${'y'.repeat(200 * 1024)}","escaped":"${ownerToken.replace('o', '\\u006f')}"}`, { headers: { 'Content-Type': 'application/json' } })).upstream);
+  assert.equal(blob.structuredContent?.truncated, true);
+  assert.equal(typeof blob.structuredContent?.preview, 'string');
+  for (const secret of [ownerToken, 'private-pass']) assert.equal(JSON.stringify(blob).includes(secret), false, secret);
+  const huge = await invoke({ cell: 'goals', method: 'GET', path: '/v1/goals' }, hub, recorder(() => Response.json({ x: 'z'.repeat(3 * 1024 * 1024) })).upstream);
+  assert.equal(huge.structuredContent?.status, 'response_too_large');
   const empty = await invoke({ cell: 'goals', method: 'PATCH', path: '/v1/goals/1', body: { title: 'y' } }, hub, recorder(() => new Response(null, { status: 204 })).upstream);
   assert.equal(empty.structuredContent?.status, 'ok');
   assert.equal(empty.structuredContent?.data, null);

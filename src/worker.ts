@@ -133,12 +133,14 @@ const CELL_CHANNEL = 'mcp';
 const CELL_METHODS = ['GET', 'POST', 'PATCH', 'PUT'] as const;
 const CELL_BODY_LIMIT = 64 * 1024;
 const CELL_RESPONSE_LIMIT = 100 * 1024;
+const CELL_READ_LIMIT = 2 * 1024 * 1024;
 const OPENAPI_LIMIT = 2 * 1024 * 1024;
 const DESCRIBE_LIMIT = 48 * 1024;
 const DESCRIBE_TTL_MS = 5 * 60 * 1000;
 const UPSTREAM_TIMEOUT_MS = 15000;
 const hubAnnotations = { readOnlyHint: true, destructiveHint: false, openWorldHint: true };
-const callAnnotations = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true };
+// PUT/PATCH can overwrite records, so clients must not treat call_cell as additive-only.
+const callAnnotations = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true };
 
 interface Cells { cells: Map<string, string>; rejected: string[]; config: 'ok' | 'missing' | 'invalid' }
 function cellsFrom(env: Env): Cells {
@@ -173,35 +175,6 @@ function contentIsJson(response: Response): boolean {
   return type === 'application/json' || Boolean(type?.endsWith('+json'));
 }
 
-// Reads at most `limit` bytes; anything beyond is cancelled and reported as truncated.
-async function prefixText(body: ReadableStream<Uint8Array> | null, limit: number): Promise<{ text: string; truncated: boolean }> {
-  if (!body) return { text: '', truncated: false };
-  const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  let truncated = false;
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      const room = limit - total;
-      if (value.byteLength > room) {
-        if (room > 0) chunks.push(value.subarray(0, room));
-        total = limit;
-        truncated = true;
-        await reader.cancel();
-        break;
-      }
-      chunks.push(value);
-      total += value.byteLength;
-    }
-  } finally { reader.releaseLock(); }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-  return { text: new TextDecoder('utf-8', { fatal: !truncated }).decode(bytes), truncated };
-}
-
 // A cut-off preview could end in the first characters of a secret; drop them.
 function dropSecretPrefix(text: string, secrets: string[]): string {
   for (const secret of secrets) {
@@ -210,6 +183,38 @@ function dropSecretPrefix(text: string, secrets: string[]): string {
     }
   }
   return text;
+}
+
+const jsonSize = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
+// Keeps responses under CELL_RESPONSE_LIMIT: trims list items (top level or one
+// level down) and only falls back to a text preview of already-redacted JSON.
+function fitResponse(data: unknown, secrets: string[]): Result {
+  if (jsonSize(data) <= CELL_RESPONSE_LIMIT) return { data };
+  const trim = (items: unknown[]) => {
+    const kept: unknown[] = [];
+    let size = 2;
+    for (const item of items) {
+      size += jsonSize(item) + 1;
+      if (size > CELL_RESPONSE_LIMIT * 0.9) break;
+      kept.push(item);
+    }
+    return kept;
+  };
+  if (Array.isArray(data)) {
+    const kept = trim(data);
+    return { data: kept, truncated: true, items_returned: kept.length, items_total: data.length };
+  }
+  if (isObject(data)) {
+    const listKey = Object.keys(data).filter(key => Array.isArray(data[key]))
+      .sort((left, right) => jsonSize(data[right]) - jsonSize(data[left]))[0];
+    if (listKey) {
+      const items = data[listKey] as unknown[];
+      const kept = trim(items);
+      const shortened = { ...data, [listKey]: kept };
+      if (jsonSize(shortened) <= CELL_RESPONSE_LIMIT) return { data: shortened, truncated: true, truncated_field: listKey, items_returned: kept.length, items_total: items.length };
+    }
+  }
+  return { truncated: true, preview: dropSecretPrefix(JSON.stringify(data).slice(0, CELL_RESPONSE_LIMIT / 2), secrets) };
 }
 
 async function withDeadline<T>(run: (signal: AbortSignal) => Promise<T>): Promise<T> {
@@ -339,9 +344,10 @@ async function callCell(input: CallInput, env: Env, cells: Cells, fetcher: Fetch
         await response.body?.cancel();
         return { ...base, status: response.ok ? 'invalid_response' : 'http_error', http_status: response.status };
       }
-      const { text, truncated } = await prefixText(response.body, CELL_RESPONSE_LIMIT);
-      if (truncated) return redact({ ...base, status, http_status: response.status, truncated: true, preview: dropSecretPrefix(text, secrets) }, secrets) as Result;
-      return redact({ ...base, status, http_status: response.status, data: text ? JSON.parse(text) : null }, secrets) as Result;
+      const text = await boundedText(response.body, CELL_READ_LIMIT);
+      // Redact the parsed value first, so any shortened output is built only from redacted data.
+      const data = redact(text ? JSON.parse(text) : null, secrets);
+      return { ...base, status, http_status: response.status, ...fitResponse(data, secrets) };
     });
   } catch (error) { return { ...base, ...failure(cell, error, signal) }; }
 }
