@@ -84,7 +84,10 @@ secret/env var ของ environment นั้น แล้วใช้คำส
 - `call_cell`: method เฉพาะ GET/POST/PATCH/PUT (ไม่มี DELETE); path ต้องขึ้นต้น
   `/v1/` ไม่มี `..`, `//`, scheme/host, `%`, query string; query เป็น object แบน
   (string/number/bool); body เป็น JSON object ไม่เกิน 64 KiB; ไม่ตาม redirect;
-  deadline 15 วินาที; response เกิน 100 KiB คืนเป็น `preview` พร้อม `truncated`
+  deadline 15 วินาที; อ่าน response ได้ไม่เกิน 2 MiB (เกินตอบ `response_too_large`);
+  redact ก่อนแล้วจึงตัดรายการใน list ให้เหลือไม่เกิน 100 KiB พร้อม `truncated`,
+  `items_returned`, `items_total` (ถ้าตัด list ไม่ได้จึงคืน `preview` ข้อความที่ redact แล้ว)
+- tool annotation ของ `call_cell` เป็น `destructiveHint: true` เพราะ PUT/PATCH เขียนทับได้
 - token ไม่ออกใน output: ค่า token ถูก redact จากทุก string, key ที่ชื่อคล้าย
   token/authorization ถูกแทนด้วย `[redacted]` และ error ของ fetch ไม่ถูกส่งต่อ
 - `MCP_READONLY = "1"` ใน `[vars]` จำกัด `call_cell` ให้ GET อย่างเดียว
