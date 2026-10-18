@@ -58,11 +58,14 @@ Tool hub ทำให้ Claude/Codex บนเครื่องใดก็ไ
 
 ### เชื่อม agent
 
-Claude Code (เครื่องใดก็ได้; token มาจาก Infisical `/mcp` ไม่เขียนลง config):
+Claude Code (เครื่องใดก็ได้): config เก็บแค่ชื่อตัวแปร `${SOLO_MCP_REMOTE_TOKEN}`
+(ใส่ single quote เพื่อไม่ให้ shell แทนค่า) Claude Code แทนค่าตอนเชื่อมต่อ token
+จริงจึงไม่ถูกเขียนลง `~/.claude.json` ก่อนเปิด session ให้ export ค่าจาก Infisical `/mcp`
+(หรือตั้งเป็น environment variable ของ cloud environment):
 
 ```bash
+claude mcp add --transport http solo-empire https://solo-empire-mcp-remote.bookchaowalit.workers.dev/mcp --header 'Authorization: Bearer ${SOLO_MCP_REMOTE_TOKEN}'
 export SOLO_MCP_REMOTE_TOKEN="$(infisical secrets get SOLO_MCP_REMOTE_TOKEN --path /mcp --plain --silent)"
-claude mcp add --transport http solo-empire https://solo-empire-mcp-remote.bookchaowalit.workers.dev/mcp --header "Authorization: Bearer ${SOLO_MCP_REMOTE_TOKEN}"
 ```
 
 Codex: `python3 manage.py configure --endpoint https://solo-empire-mcp-remote.bookchaowalit.workers.dev/mcp`
