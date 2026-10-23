@@ -1,6 +1,8 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { z } from 'zod';
+import * as Sentry from '@sentry/cloudflare';
+import { sentryOptions } from './sentry.js';
 
 export interface Env {
   MCP_TOKEN_SHA256?: string;
@@ -15,6 +17,7 @@ export interface Env {
   CELLS?: string | Record<string, unknown>;
   EMPIRE_OWNER_MCP_TOKEN?: string;
   MCP_READONLY?: string;
+  SENTRY_DSN?: string;
 }
 
 type ServiceId = 'ai' | 'agency' | 'income';
@@ -463,8 +466,15 @@ export async function handleRequest(request: Request, env: Env, fetcher: Fetcher
     headers.set('Cache-Control', 'no-store');
     headers.set('X-Content-Type-Options', 'nosniff');
     return new Response(bytes.byteLength ? bytes : null, { status: response.status, headers });
-  } catch { return jsonError(500, 'internal_error'); }
+  } catch (error) {
+    // Only the error itself is reported (no request, headers or tool arguments); see src/sentry.ts.
+    Sentry.captureException(error);
+    return jsonError(500, 'internal_error');
+  }
   finally { await server.close(); }
 }
 
-export default { fetch: (request: Request, env: Env) => handleRequest(request, env) };
+// Uncaught errors reach Sentry only when the SENTRY_DSN secret is set (errors only; see src/sentry.ts).
+export default Sentry.withSentry((env: Env) => sentryOptions(env), {
+  fetch: (request: Request, env: Env) => handleRequest(request, env),
+});

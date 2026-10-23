@@ -152,6 +152,16 @@ Rollback: ปิด client entry `solo-empire-remote` และย้อน Work
 ต้องเปลี่ยน database หรือ service ของ upstream
 
 
+## Sentry
+
+`src/sentry.ts` เป็นสำเนาของ `~/work/b-tier-b/sentry-ref/sentry.ts` (repo นี้เป็นเจ้าของสำเนาเอง)
+ปรับสำหรับ Worker: `withSentry` ทำงานเฉพาะเมื่อมี secret `SENTRY_DSN`; ถ้าไม่มีเป็น no-op
+และพฤติกรรมเหมือนเดิม ส่งเฉพาะ error (ไม่มี tracing, breadcrumbs, trace header ไปยัง cell)
+`beforeSend` ลบ request (รวม header `Authorization`), `extra`, user และ context ที่ไม่ใช่ platform
+และ redact bearer token/credential ใน message; ไม่แนบ tool arguments ตั้ง DSN ด้วย
+`wrangler secret put SENTRY_DSN` (org `personal-yu0`) เทสต์: `tests/sentry.test.ts`,
+`tests/sentry-worker.test.ts`
+
 ## ที่มา / การย้าย
 
 ย้ายมาจาก `solo-empire/infra/mcp-remote/` (2026-10-11) พร้อมประวัติ git. Worker ที่ deploy แล้ว: `solo-empire-mcp-remote` บน Cloudflare Workers (`wrangler.toml` อยู่ที่ root ของ repo นี้; deploy ผ่าน `python3 manage.py deploy` เท่านั้น).
