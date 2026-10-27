@@ -34,6 +34,7 @@ CELLS = '''
   "learning": "https://learning-api-production-3cee.up.railway.app",
   "liabilities": "https://liabilities-api-production.up.railway.app",
   "notifications": "https://notifications-api-production-c9d8.up.railway.app",
+  "offers": "https://offers-api-production.up.railway.app",
   "operating": "https://operating-api-production.up.railway.app",
   "opportunities": "https://opportunities-api-production.up.railway.app",
   "projects": "https://projects-api-production-f4eb.up.railway.app",
