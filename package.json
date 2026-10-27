@@ -13,10 +13,10 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
     "@sentry/cloudflare": "11.6.0",
-    "zod": "4.6.5"
+    "zod": "4.6.6"
   },
   "overrides": {
-    "undici": "7.29.1",
+    "undici": "7.30.1",
     "sharp": "0.35.5",
     "ip-address": "10.7.4"
   },
