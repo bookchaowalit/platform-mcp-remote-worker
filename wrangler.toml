@@ -11,40 +11,42 @@ AI_API_ORIGIN = "https://api.bookchaowalit.com"
 AGENCY_CRM_ORIGIN = "https://crm-api-production-a7e0.up.railway.app"
 INCOME_CRM_ORIGIN = "https://crm-api-production-19fd.up.railway.app"
 ALLOWED_ORIGINS = ""
-# Tool hub: every own Solo Empire cell (tasks = platform-empire tasks-api).
-# Hosts must also be in CELL_HOSTS (src/worker.ts); others are rejected.
+# Tool hub: every own Solo Empire cell (tasks = platform-empire tasks-api, gateway route
+# empire-platform). Since 2026-11-03 every cell goes through the edge gateway
+# (gateway.bookchaowalit.com/v1/<system>, platform-api-gateway SPEC-001). A value must be that
+# exact form or a direct origin in CELL_HOSTS (src/worker.ts); others are rejected.
+# Rollback: put a cell's direct origin back here and redeploy.
 # Client systems are not listed. Set MCP_READONLY = "1" to allow GET only.
 MCP_READONLY = ""
-CELLS = '''
-{
-  "accounts": "https://accounts-api-production-cfee.up.railway.app",
-  "automation": "https://automation-api-production-af8e.up.railway.app",
-  "budgets": "https://budgets-api-production-690e.up.railway.app",
-  "business-assets": "https://business-assets-api-production.up.railway.app",
-  "cash-flow": "https://cash-flow-api-production.up.railway.app",
-  "content": "https://content-api-production-bca7.up.railway.app",
-  "decisions": "https://decisions-api-production-1ef5.up.railway.app",
-  "diary": "https://diary-api-production-2db8.up.railway.app",
-  "finance-accounts": "https://finance-accounts-api-production.up.railway.app",
-  "goals": "https://goals-api-production-c16e.up.railway.app",
-  "habits": "https://habits-api-production-e516.up.railway.app",
-  "health": "https://health-api-production-c72f.up.railway.app",
-  "intake": "https://intake-api-production.up.railway.app",
-  "investments": "https://investments-api-production.up.railway.app",
-  "learning": "https://learning-api-production-3cee.up.railway.app",
-  "liabilities": "https://liabilities-api-production.up.railway.app",
-  "notifications": "https://notifications-api-production-c9d8.up.railway.app",
-  "offers": "https://offers-api-production.up.railway.app",
-  "operating": "https://operating-api-production.up.railway.app",
-  "opportunities": "https://opportunities-api-production.up.railway.app",
-  "projects": "https://projects-api-production-f4eb.up.railway.app",
-  "radar": "https://radar-api-production-7fe7.up.railway.app",
-  "reconciliations": "https://reconciliations-api-production.up.railway.app",
-  "roles-skills": "https://roles-skills-api-production.up.railway.app",
-  "subscriptions": "https://subscriptions-api-production-b1d4.up.railway.app",
-  "tasks": "https://tasks-api-production-4785.up.railway.app",
-  "tax": "https://tax-api-production-57f6.up.railway.app",
-  "time": "https://time-api-production-2050.up.railway.app",
-  "transactions": "https://transactions-api-production-4078.up.railway.app"
+CELLS = '''{
+  "accounts": "https://gateway.bookchaowalit.com/v1/accounts",
+  "automation": "https://gateway.bookchaowalit.com/v1/automation",
+  "budgets": "https://gateway.bookchaowalit.com/v1/budgets",
+  "business-assets": "https://gateway.bookchaowalit.com/v1/business-assets",
+  "cash-flow": "https://gateway.bookchaowalit.com/v1/cash-flow",
+  "content": "https://gateway.bookchaowalit.com/v1/content",
+  "decisions": "https://gateway.bookchaowalit.com/v1/decisions",
+  "diary": "https://gateway.bookchaowalit.com/v1/diary",
+  "finance-accounts": "https://gateway.bookchaowalit.com/v1/finance-accounts",
+  "goals": "https://gateway.bookchaowalit.com/v1/goals",
+  "habits": "https://gateway.bookchaowalit.com/v1/habits",
+  "health": "https://gateway.bookchaowalit.com/v1/health",
+  "intake": "https://gateway.bookchaowalit.com/v1/intake",
+  "investments": "https://gateway.bookchaowalit.com/v1/investments",
+  "learning": "https://gateway.bookchaowalit.com/v1/learning",
+  "liabilities": "https://gateway.bookchaowalit.com/v1/liabilities",
+  "notifications": "https://gateway.bookchaowalit.com/v1/notifications",
+  "offers": "https://gateway.bookchaowalit.com/v1/offers",
+  "operating": "https://gateway.bookchaowalit.com/v1/operating",
+  "opportunities": "https://gateway.bookchaowalit.com/v1/opportunities",
+  "projects": "https://gateway.bookchaowalit.com/v1/projects",
+  "radar": "https://gateway.bookchaowalit.com/v1/radar",
+  "reconciliations": "https://gateway.bookchaowalit.com/v1/reconciliations",
+  "roles-skills": "https://gateway.bookchaowalit.com/v1/roles-skills",
+  "subscriptions": "https://gateway.bookchaowalit.com/v1/subscriptions",
+  "tasks": "https://gateway.bookchaowalit.com/v1/empire-platform",
+  "tax": "https://gateway.bookchaowalit.com/v1/tax",
+  "time": "https://gateway.bookchaowalit.com/v1/time",
+  "transactions": "https://gateway.bookchaowalit.com/v1/transactions"
 }
 '''

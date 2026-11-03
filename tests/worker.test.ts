@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { readFileSync } from 'node:fs';
-import { CELL_HOSTS, cellPath, handleRequest, type Env } from '../src/worker.js';
+import { CELL_HOSTS, GATEWAY_ORIGIN, cellBase, cellPath, cellUrl, handleRequest, type Env } from '../src/worker.js';
 
 const token = 'local-test-bearer-with-sufficient-entropy';
 const url = 'https://mcp.example.com/mcp';
@@ -187,6 +187,8 @@ test('upstream deadline cancels the request after fifteen seconds without exposi
 const wranglerCells = JSON.parse(/^CELLS = '''([\s\S]*?)'''$/m.exec(readFileSync(new URL('../wrangler.toml', import.meta.url), 'utf8'))![1]) as Record<string, string>;
 const ownerToken = 'owner-mcp-private-test-jwt-value';
 const hub: Env = { ...env, CELLS: JSON.stringify(wranglerCells), EMPIRE_OWNER_MCP_TOKEN: ownerToken };
+// The production goals base (through the gateway since 2026-11-03).
+const goalsBase = wranglerCells.goals;
 const goals = 'https://goals-api-production-c16e.up.railway.app';
 type Seen = { url: string; method?: string; headers: Headers; body?: string };
 function recorder(reply: () => Response = () => Response.json({ items: [] })) {
@@ -205,10 +207,14 @@ async function invoke(args: Record<string, unknown>, config: Env = hub, upstream
   } catch { return { rejected: true }; }
 }
 
-test('wrangler CELLS lists every own cell and exactly the allowlisted hosts', () => {
-  const hosts = Object.values(wranglerCells).map(value => new URL(value).hostname);
-  assert.deepEqual([...hosts].sort(), [...CELL_HOSTS].sort());
-  assert.ok(Object.values(wranglerCells).every(value => value.startsWith('https://') && new URL(value).pathname === '/'));
+test('wrangler CELLS routes every own cell through the gateway; CELL_HOSTS stays the rollback list', () => {
+  // One gateway route per allowlisted direct host (the gateway itself maps routes to those hosts).
+  assert.equal(Object.keys(wranglerCells).length, CELL_HOSTS.length);
+  for (const [name, value] of Object.entries(wranglerCells)) {
+    assert.equal(cellBase(value), value, name);
+    assert.ok(value.startsWith(`${GATEWAY_ORIGIN}/v1/`), name);
+  }
+  assert.equal(wranglerCells.tasks, `${GATEWAY_ORIGIN}/v1/empire-platform`);
   for (const name of ['goals', 'tasks', 'tax', 'projects', 'habits', 'decisions']) assert.ok(name in wranglerCells, name);
   for (const client of ['crm', 'crm-income', 'agency']) assert.equal(client in wranglerCells, false);
 });
@@ -217,7 +223,7 @@ test('list_cells reports names, hosts and token presence without the token', asy
   const listed = await call('list_cells', hub);
   const content = listed.structuredContent as { cells: { name: string; host: string }[]; token_configured: boolean; read_only: boolean; rejected: string[] };
   assert.equal(content.cells.length, Object.keys(wranglerCells).length);
-  assert.ok(content.cells.some(cell => cell.name === 'goals' && cell.host === new URL(goals).host));
+  assert.ok(content.cells.some(cell => cell.name === 'goals' && cell.host === 'gateway.bookchaowalit.com/v1/goals'));
   assert.equal(content.token_configured, true);
   assert.equal(content.read_only, false);
   assert.deepEqual(content.rejected, []);
@@ -298,7 +304,7 @@ test('call_cell forwards bearer, channel, query and body; the token never reache
   assert.equal(serialized.includes('leaked'), false);
   assert.equal(seen.length, 1);
   const [sent] = seen;
-  assert.equal(sent.url, `${goals}/v1/goals?dry_run=true&limit=5&q=a+b%26c`);
+  assert.equal(sent.url, `${goalsBase}/v1/goals?dry_run=true&limit=5&q=a+b%26c`);
   assert.equal(sent.method, 'POST');
   assert.equal(sent.headers.get('authorization'), `Bearer ${ownerToken}`);
   assert.equal(sent.headers.get('x-empire-channel'), 'mcp');
@@ -403,14 +409,14 @@ test('describe_cell returns compact callable operations and caches per isolate',
     { method: 'PATCH', path: '/v1/goals/{goal_id}', summary: 'Update Goal', params: ['path:goal_id'] },
   ]);
   assert.equal(content.omitted_operations, 2);
-  assert.equal(seen[0].url, `${goals}/openapi.json`);
+  assert.equal(seen[0].url, `${goalsBase}/openapi.json`);
   assert.equal(seen[0].headers.has('authorization'), false);
   const second = await call('describe_cell', hub, upstream, { cell: 'goals' });
   assert.equal(second.structuredContent?.cached, true);
   assert.equal(seen.length, 1);
   await call('describe_cell', hub, upstream, { cell: 'tax' });
   assert.equal(seen.length, 2);
-  const alias = await call('describe_cell', { ...hub, CELLS: JSON.stringify({ ...wranglerCells, 'goals-alias': goals }) }, upstream, { cell: 'goals-alias' });
+  const alias = await call('describe_cell', { ...hub, CELLS: JSON.stringify({ ...wranglerCells, 'goals-alias': goalsBase }) }, upstream, { cell: 'goals-alias' });
   assert.equal(alias.structuredContent?.cell, 'goals-alias');
   assert.equal(alias.structuredContent?.cached, true);
 });
@@ -432,4 +438,26 @@ test('describe_cell caps output size and reports unknown cells and upstream erro
   const failed = await call('describe_cell', hub, recorder(() => new Response('private', { status: 500 })).upstream, { cell: 'goals' });
   assert.equal(failed.structuredContent?.status, 'http_error');
   assert.equal(JSON.stringify(failed).includes('private'), false);
+});
+
+test('gateway bases: only GATEWAY_ORIGIN + /v1/<system>, and the prefix is kept', async () => {
+  const gw = `${GATEWAY_ORIGIN}/v1/goals`;
+  for (const ok of [gw, `${GATEWAY_ORIGIN}/v1/empire-platform`]) assert.equal(cellBase(ok), ok);
+  for (const bad of [`${GATEWAY_ORIGIN}`, `${GATEWAY_ORIGIN}/`, `${GATEWAY_ORIGIN}/v1/`, `${GATEWAY_ORIGIN}/v1/goals/`, `${GATEWAY_ORIGIN}/v2/goals`,
+    `${GATEWAY_ORIGIN}/v1/goals/x`, `${GATEWAY_ORIGIN}/v1/Goals`, `${GATEWAY_ORIGIN}/v1/goals?x=1`, `${GATEWAY_ORIGIN}:8443/v1/goals`,
+    'https://u:p@gateway.bookchaowalit.com/v1/goals', 'http://gateway.bookchaowalit.com/v1/goals', 'https://evil.example.com/v1/goals',
+    'https://gateway.bookchaowalit.com.evil.example/v1/goals', `${GATEWAY_ORIGIN}/v1/../admin`, `${GATEWAY_ORIGIN}/v1/%2e%2e`]) {
+    assert.equal(cellBase(bad), null, bad);
+  }
+  assert.equal(cellUrl(gw, '/v1/goals')?.href, `${GATEWAY_ORIGIN}/v1/goals/v1/goals`);
+  assert.equal(cellUrl(gw, '/openapi.json')?.href, `${GATEWAY_ORIGIN}/v1/goals/openapi.json`);
+  assert.equal(cellUrl(goals, '/v1/goals')?.href, `${goals}/v1/goals`);
+
+  const { seen, upstream } = recorder();
+  const config = { ...hub, CELLS: JSON.stringify({ goals: gw }) };
+  await invoke({ cell: 'goals', method: 'GET', path: '/v1/goals' }, config, upstream);
+  assert.equal(seen.length, 1);
+  assert.equal(new URL(seen[0].url).href, `${GATEWAY_ORIGIN}/v1/goals/v1/goals`);
+  const listed = await call('list_cells', config);
+  assert.deepEqual(listed.structuredContent?.cells, [{ name: 'goals', host: 'gateway.bookchaowalit.com/v1/goals' }]);
 });

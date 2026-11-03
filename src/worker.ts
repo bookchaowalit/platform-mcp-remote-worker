@@ -140,6 +140,36 @@ export const CELL_HOSTS: readonly string[] = [
   'tasks-api-production-4785.up.railway.app', 'tax-api-production-57f6.up.railway.app',
   'time-api-production-2050.up.railway.app', 'transactions-api-production-4078.up.railway.app',
 ];
+// Since 2026-11-03 the cells are reached through the edge gateway (platform-api-gateway SPEC-001):
+// a CELLS value may also be exactly GATEWAY_ORIGIN + "/v1/<system>". The gateway host and that
+// route shape are fixed here too, so configuration still cannot point the hub anywhere else.
+// Rollback: put the direct origin (one of CELL_HOSTS) back in CELLS.
+export const GATEWAY_ORIGIN = 'https://gateway.bookchaowalit.com';
+const GATEWAY_ROUTE = /^\/v1\/[a-z][a-z0-9-]{1,62}$/;
+
+export function cellBase(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const origin = httpsOrigin(value);
+  if (origin && CELL_HOSTS.includes(new URL(origin).hostname)) return origin;
+  try {
+    const url = new URL(value);
+    if (url.origin === GATEWAY_ORIGIN && !url.username && !url.password && !url.search && !url.hash &&
+        GATEWAY_ROUTE.test(url.pathname) && value === `${GATEWAY_ORIGIN}${url.pathname}`) return value;
+  } catch { /* not a URL */ }
+  return null;
+}
+
+// What list_cells/describe_cell show: the host, plus the gateway route when there is one.
+const cellHost = (base: string) => { const u = new URL(base); return u.pathname === '/' ? u.host : `${u.host}${u.pathname}`; };
+
+// The URL for `path` under a cell base, or null if it would leave that base.
+export function cellUrl(base: string, path: string): URL | null {
+  const root = new URL(base);
+  const prefix = root.pathname === '/' ? '' : root.pathname;
+  const target = new URL(`${root.origin}${prefix}${path}`);
+  return target.origin === root.origin && target.pathname === `${prefix}${path}` ? target : null;
+}
+
 // Cells read this header to tell callers apart (cellkit CHANNELS includes "mcp").
 const CELL_CHANNEL = 'mcp';
 const CELL_METHODS = ['GET', 'POST', 'PATCH', 'PUT'] as const;
@@ -165,8 +195,8 @@ function cellsFrom(env: Env): Cells {
   }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { cells, rejected, config: 'invalid' };
   for (const [name, value] of Object.entries(raw)) {
-    const origin = typeof value === 'string' ? httpsOrigin(value) : null;
-    if (/^[a-z][a-z0-9-]{0,39}$/.test(name) && origin && CELL_HOSTS.includes(new URL(origin).hostname)) cells.set(name, origin);
+    const base = cellBase(value);
+    if (/^[a-z][a-z0-9-]{0,39}$/.test(name) && base) cells.set(name, base);
     else rejected.push(/^[a-z0-9-]{1,40}$/.test(name) ? name : '[invalid-name]');
   }
   return { cells, rejected, config: 'ok' };
@@ -301,7 +331,7 @@ async function describeCell(name: string, cells: Cells, fetcher: Fetcher, secret
   try {
     return await withDeadline(async deadline => {
       signal = deadline;
-      const response = await fetcher(new URL('/openapi.json', origin), { method: 'GET', redirect: 'manual', signal: deadline, headers: { Accept: 'application/json' } });
+      const response = await fetcher(cellUrl(origin, '/openapi.json')!, { method: 'GET', redirect: 'manual', signal: deadline, headers: { Accept: 'application/json' } });
       if (!response.ok || !contentIsJson(response)) {
         await response.body?.cancel();
         return { cell: name, status: response.ok ? 'invalid_response' : 'http_error', http_status: response.status };
@@ -315,7 +345,7 @@ async function describeCell(name: string, cells: Cells, fetcher: Fetcher, secret
         if (size > DESCRIBE_LIMIT) break;
         kept.push(operation);
       }
-      const result = redact({ cell: name, status: 'ok', host: new URL(origin).host, operations: kept,
+      const result = redact({ cell: name, status: 'ok', host: cellHost(origin), operations: kept,
         omitted_operations: omitted, truncated: kept.length < operations.length, cached: false }, secrets) as Result;
       cache.set(origin, { expires: Date.now() + DESCRIBE_TTL_MS, result });
       return result;
@@ -334,8 +364,8 @@ async function callCell(input: CallInput, env: Env, cells: Cells, fetcher: Fetch
   const path = cellPath(input.path);
   if (!path) return { cell, status: 'invalid_path' };
   if (input.method === 'GET' && input.body !== undefined) return { cell, status: 'invalid_request', reason: 'get_has_no_body' };
-  const target = new URL(path, origin);
-  if (target.origin !== origin || target.pathname !== path) return { cell, status: 'invalid_path' };
+  const target = cellUrl(origin, path);
+  if (!target) return { cell, status: 'invalid_path' };
   for (const [key, value] of Object.entries(input.query ?? {})) target.searchParams.append(key, String(value));
   const body = input.body === undefined ? undefined : JSON.stringify(input.body);
   if (body !== undefined && new TextEncoder().encode(body).byteLength > CELL_BODY_LIMIT) return { cell, status: 'body_too_large' };
@@ -374,7 +404,7 @@ function registerCellTools(server: McpServer, env: Env, fetcher: Fetcher, secret
   const cellName = z.string().max(40).describe(`ชื่อ cell จาก list_cells เช่น ${names.slice(0, 4).join(', ') || 'goals'}`);
   server.registerTool('list_cells', {
     description: 'แสดง Solo Empire cell API ที่ hub เรียกได้ (ชื่อ, host) และสถานะ token โดยไม่เปิดเผยค่า token', inputSchema: {}, annotations: hubAnnotations,
-  }, async () => toolResult({ cells: names.map(name => ({ name, host: new URL(cells.cells.get(name)!).host })), config: cells.config,
+  }, async () => toolResult({ cells: names.map(name => ({ name, host: cellHost(cells.cells.get(name)!) })), config: cells.config,
     rejected: cells.rejected, token_configured: Boolean(env.EMPIRE_OWNER_MCP_TOKEN), read_only: readOnly(env), channel: CELL_CHANNEL,
     allowed_methods: readOnly(env) ? ['GET'] : [...CELL_METHODS] }));
   server.registerTool('describe_cell', {
