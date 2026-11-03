@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, createVerify, generateKeyPairSync } from 'node:crypto';
 import { test } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { readFileSync } from 'node:fs';
-import { CELL_HOSTS, GATEWAY_ORIGIN, cellBase, cellPath, cellUrl, handleRequest, type Env } from '../src/worker.js';
+import { CELL_HOSTS, GATEWAY_ORIGIN, IDENTITY_ORIGIN, PLATFORM_CELLS, cellBase, cellPath, cellUrl, handleRequest, resetPlatformTokens, type Env } from '../src/worker.js';
 
 const token = 'local-test-bearer-with-sufficient-entropy';
 const url = 'https://mcp.example.com/mcp';
@@ -191,11 +191,11 @@ const hub: Env = { ...env, CELLS: JSON.stringify(wranglerCells), EMPIRE_OWNER_MC
 const goalsBase = wranglerCells.goals;
 const goals = 'https://goals-api-production-c16e.up.railway.app';
 type Seen = { url: string; method?: string; headers: Headers; body?: string };
-function recorder(reply: () => Response = () => Response.json({ items: [] })) {
+function recorder(reply: () => Response = () => Response.json({ items: [] }), tokenReply?: () => Response) {
   const seen: Seen[] = [];
   const upstream: typeof fetch = async (input, init) => {
     seen.push({ url: String(input), method: init?.method, headers: new Headers(init?.headers), body: init?.body as string | undefined });
-    return reply();
+    return tokenReply && String(input) === `${IDENTITY_ORIGIN}/v1/token` ? tokenReply() : reply();
   };
   return { seen, upstream };
 }
@@ -460,4 +460,118 @@ test('gateway bases: only GATEWAY_ORIGIN + /v1/<system>, and the prefix is kept'
   assert.equal(new URL(seen[0].url).href, `${GATEWAY_ORIGIN}/v1/goals/v1/goals`);
   const listed = await call('list_cells', config);
   assert.deepEqual(listed.structuredContent?.cells, [{ name: 'goals', host: 'gateway.bookchaowalit.com/v1/goals' }]);
+});
+
+// --- Book Platform services (identity service client) ----------------------
+const platformCells = Object.keys(PLATFORM_CELLS);
+const { privateKey: platformKeyPem, publicKey: platformPublicKey } = generateKeyPairSync('rsa', {
+  modulusLength: 2048, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' },
+});
+const platformToken = 'platform-access-token-private-value';
+const platformHub: Env = { ...hub, IDENTITY_CLIENT_ID: 'mcp-hub', IDENTITY_CLIENT_PRIVATE_KEY_PEM: platformKeyPem };
+function platformRecorder(tokenReply: () => Response = () => Response.json({ access_token: platformToken, token_type: 'Bearer', expires_in: 600 })) {
+  return recorder(() => Response.json({ items: [] }), tokenReply);
+}
+function claimsOf(jwt: string) {
+  const [header, payload, signature] = jwt.split('.');
+  const valid = createVerify('RSA-SHA256').update(`${header}.${payload}`).verify(platformPublicKey, Buffer.from(signature, 'base64url'));
+  return { valid, header: JSON.parse(Buffer.from(header, 'base64url').toString()), claims: JSON.parse(Buffer.from(payload, 'base64url').toString()) };
+}
+
+test('platform cells: one gateway route each, audiences distinct, owner scopes only, within identity limits', () => {
+  assert.deepEqual(platformCells.sort(), ['platform-commerce', 'platform-communication', 'platform-data', 'platform-developer',
+    'platform-logistics', 'platform-media', 'platform-security', 'platform-workflow']);
+  for (const name of platformCells) assert.equal(wranglerCells[name], `${GATEWAY_ORIGIN}/v1/${name}`, name);
+  const audiences = Object.values(PLATFORM_CELLS).map(cell => cell.audience);
+  assert.equal(new Set(audiences).size, audiences.length);
+  assert.ok(audiences.length <= 16);
+  const scopes = Object.values(PLATFORM_CELLS).flatMap(cell => cell.scopes);
+  assert.equal(new Set(scopes).size, scopes.length);
+  assert.ok(scopes.length <= 32);
+  // Machine-only scopes stay with their workers; agents cannot forge audit events.
+  for (const machine of ['jobs:work', 'quotas:reserve', 'quotas:settle', 'quotas:service', 'audit:write']) assert.equal(scopes.includes(machine), false, machine);
+});
+
+test('platform call without an identity client answers not_configured and calls nothing', async () => {
+  resetPlatformTokens();
+  const { seen, upstream } = platformRecorder();
+  const result = await invoke({ cell: 'platform-commerce', method: 'GET', path: '/v1/catalog/products' }, hub, upstream);
+  assert.equal(result.isError, true);
+  assert.equal(result.structuredContent?.status, 'not_configured');
+  assert.equal(result.structuredContent?.missing, 'IDENTITY_CLIENT_PRIVATE_KEY_PEM');
+  assert.equal(seen.length, 0);
+});
+
+test('platform call gets an audience-bound identity token with a signed assertion, then calls the service with it', async () => {
+  resetPlatformTokens();
+  const { seen, upstream } = platformRecorder();
+  const result = await invoke({ cell: 'platform-commerce', method: 'GET', path: '/v1/catalog/products', query: { limit: 5 } }, platformHub, upstream);
+  assert.equal(result.structuredContent?.status, 'ok');
+  assert.equal(seen.length, 2);
+  const [tokenRequest, serviceRequest] = seen;
+  assert.equal(tokenRequest.url, `${IDENTITY_ORIGIN}/v1/token`);
+  assert.equal(tokenRequest.method, 'POST');
+  assert.equal(tokenRequest.headers.get('content-type'), 'application/x-www-form-urlencoded');
+  const form = new URLSearchParams(tokenRequest.body);
+  assert.equal(form.get('grant_type'), 'client_credentials');
+  assert.equal(form.get('audience'), 'commerce-api');
+  assert.equal(form.get('scope'), PLATFORM_CELLS['platform-commerce'].scopes.join(' '));
+  assert.equal(form.get('client_id'), 'mcp-hub');
+  assert.equal(form.get('client_assertion_type'), 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer');
+  const { valid, header, claims } = claimsOf(form.get('client_assertion')!);
+  assert.equal(valid, true);
+  assert.equal(header.alg, 'RS256');
+  assert.equal(claims.iss, 'mcp-hub');
+  assert.equal(claims.sub, 'mcp-hub');
+  assert.equal(claims.aud, `${IDENTITY_ORIGIN}/v1/token`);
+  assert.ok(Number.isInteger(claims.iat) && claims.exp - claims.iat > 0 && claims.exp - claims.iat <= 300);
+  assert.match(claims.jti, /^[0-9a-f-]{36}$/);
+  assert.equal(serviceRequest.url, `${GATEWAY_ORIGIN}/v1/platform-commerce/v1/catalog/products?limit=5`);
+  assert.equal(serviceRequest.headers.get('authorization'), `Bearer ${platformToken}`);
+  assert.equal(serviceRequest.headers.get('x-empire-channel'), 'mcp');
+  const serialized = JSON.stringify(result);
+  for (const secret of [platformToken, ownerToken, 'PRIVATE KEY']) assert.equal(serialized.includes(secret), false, secret);
+});
+
+test('platform tokens are cached per audience until shortly before they expire', async () => {
+  resetPlatformTokens();
+  const { seen, upstream } = platformRecorder();
+  await invoke({ cell: 'platform-commerce', method: 'GET', path: '/v1/catalog/products' }, platformHub, upstream);
+  await invoke({ cell: 'platform-commerce', method: 'GET', path: '/v1/orders' }, platformHub, upstream);
+  await invoke({ cell: 'platform-media', method: 'GET', path: '/v1/files' }, platformHub, upstream);
+  const tokenRequests = seen.filter(sent => sent.url === `${IDENTITY_ORIGIN}/v1/token`);
+  assert.deepEqual(tokenRequests.map(sent => new URLSearchParams(sent.body).get('audience')), ['commerce-api', 'media-api']);
+  resetPlatformTokens();
+  const short = platformRecorder(() => Response.json({ access_token: platformToken, token_type: 'Bearer', expires_in: 20 }));
+  await invoke({ cell: 'platform-media', method: 'GET', path: '/v1/files' }, platformHub, short.upstream);
+  await invoke({ cell: 'platform-media', method: 'GET', path: '/v1/files' }, platformHub, short.upstream);
+  assert.equal(short.seen.filter(sent => sent.url === `${IDENTITY_ORIGIN}/v1/token`).length, 2);
+});
+
+test('identity refusals and malformed token replies stop before the service and leak nothing', async () => {
+  for (const reply of [
+    () => Response.json({ error: 'invalid_client', error_description: 'private detail' }, { status: 401 }),
+    () => Response.json({ token_type: 'Bearer' }),
+    () => new Response('not json', { headers: { 'Content-Type': 'text/plain' } }),
+  ]) {
+    resetPlatformTokens();
+    const { seen, upstream } = platformRecorder(reply);
+    const result = await invoke({ cell: 'platform-data', method: 'GET', path: '/v1/documents' }, platformHub, upstream);
+    assert.equal(result.isError, true);
+    assert.equal(result.structuredContent?.status, 'token_error');
+    assert.equal(seen.length, 1);
+    assert.equal(JSON.stringify(result).includes('private detail'), false);
+  }
+  resetPlatformTokens();
+  const bad = await invoke({ cell: 'platform-data', method: 'GET', path: '/v1/documents' },
+    { ...platformHub, IDENTITY_CLIENT_PRIVATE_KEY_PEM: '-----BEGIN RSA PRIVATE KEY-----\nAAAA\n-----END RSA PRIVATE KEY-----' }, platformRecorder().upstream);
+  assert.equal(bad.structuredContent?.status, 'not_configured');
+});
+
+test('own cells keep the owner-mcp token and never ask identity', async () => {
+  resetPlatformTokens();
+  const { seen, upstream } = platformRecorder();
+  await invoke({ cell: 'goals', method: 'GET', path: '/v1/goals' }, platformHub, upstream);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].headers.get('authorization'), `Bearer ${ownerToken}`);
 });

@@ -16,6 +16,8 @@ export interface Env {
   INCOME_CRM_TOKEN?: string;
   CELLS?: string | Record<string, unknown>;
   EMPIRE_OWNER_MCP_TOKEN?: string;
+  IDENTITY_CLIENT_ID?: string;
+  IDENTITY_CLIENT_PRIVATE_KEY_PEM?: string;
   MCP_READONLY?: string;
   SENTRY_DSN?: string;
 }
@@ -139,7 +141,67 @@ export const CELL_HOSTS: readonly string[] = [
   'roles-skills-api-production.up.railway.app', 'subscriptions-api-production-b1d4.up.railway.app',
   'tasks-api-production-4785.up.railway.app', 'tax-api-production-57f6.up.railway.app',
   'time-api-production-2050.up.railway.app', 'transactions-api-production-4078.up.railway.app',
+  // Book Platform services (bookchaowalit-backend/platform-<svc>, live 2026-10-29 / security 2026-11-02).
+  'commerce-api-production-9b24.up.railway.app', 'communication-api-production.up.railway.app',
+  'data-api-production-bf8a.up.railway.app', 'developer-api-production-2fad.up.railway.app',
+  'logistics-api-production-d3bb.up.railway.app', 'media-api-production-91a5.up.railway.app',
+  'security-api-production-f817.up.railway.app', 'workflow-api-production-63de.up.railway.app',
 ];
+// Book Platform services trust only platform-identity tokens bound to their own audience
+// (owner-mcp tokens get 401). The hub is an identity service client (client_credentials with a
+// private_key_jwt assertion, platform-identity docs/SERVICE-CLIENTS.md) and asks, per audience,
+// for that service's owner scopes only. Machine scopes (jobs:work, quotas:reserve/settle) stay
+// with their workers, and audit:write with posture-monitor, so agents cannot forge audit events.
+export const IDENTITY_ORIGIN = 'https://identity-api-production-fad1.up.railway.app';
+export const PLATFORM_CELLS: Readonly<Record<string, { audience: string; scopes: readonly string[] }>> = {
+  'platform-commerce': { audience: 'commerce-api', scopes: ['catalog:read', 'catalog:write', 'cart:read', 'cart:write', 'orders:read', 'orders:write', 'promotions:read', 'promotions:write'] },
+  'platform-communication': { audience: 'communication-api', scopes: ['messages:read', 'messages:write', 'opt-outs:write'] },
+  'platform-data': { audience: 'data-api', scopes: ['cache:read', 'cache:write', 'counters:write', 'documents:read', 'documents:write', 'quotas:write'] },
+  'platform-developer': { audience: 'developer-api', scopes: ['flags:read', 'flags:write'] },
+  'platform-logistics': { audience: 'logistics-api', scopes: ['rates:read', 'shipments:read', 'shipments:write', 'labels:write', 'tracking:write'] },
+  'platform-media': { audience: 'media-api', scopes: ['files:read', 'files:write'] },
+  'platform-security': { audience: 'security-api', scopes: ['audit:read', 'references:read', 'references:write'] },
+  'platform-workflow': { audience: 'workflow-api', scopes: ['jobs:read', 'jobs:write'] },
+};
+const ASSERTION_LIFETIME_SECONDS = 60;
+// Refresh this long before expiry, so a token never runs out during a call.
+const TOKEN_REFRESH_MARGIN_SECONDS = 30;
+const platformTokens = new Map<string, { token: string; expires: number }>();
+export function resetPlatformTokens(): void { platformTokens.clear(); }
+
+class TokenError extends Error {}
+const base64url = (bytes: ArrayBuffer | Uint8Array) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const jsonPart = (value: unknown) => base64url(new TextEncoder().encode(JSON.stringify(value)));
+
+// PKCS#8 only ("BEGIN PRIVATE KEY"); a PKCS#1 key or anything else is a configuration error.
+async function signingKey(pem: string): Promise<CryptoKey | null> {
+  const match = /^-----BEGIN PRIVATE KEY-----([A-Za-z0-9+/=\s]+)-----END PRIVATE KEY-----\s*$/.exec(pem.trim());
+  if (!match) return null;
+  try {
+    const der = Uint8Array.from(atob(match[1].replace(/\s+/g, '')), char => char.charCodeAt(0));
+    return await crypto.subtle.importKey('pkcs8', der, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign']);
+  } catch { return null; }
+}
+
+async function platformToken(cell: { audience: string; scopes: readonly string[] }, clientId: string, key: CryptoKey, fetcher: Fetcher, signal: AbortSignal): Promise<string> {
+  const cached = platformTokens.get(`${clientId}|${cell.audience}`);
+  if (cached && cached.expires > Date.now() / 1000 + TOKEN_REFRESH_MARGIN_SECONDS) return cached.token;
+  const now = Math.floor(Date.now() / 1000);
+  const unsigned = `${jsonPart({ alg: 'RS256', typ: 'JWT' })}.${jsonPart({ iss: clientId, sub: clientId, aud: `${IDENTITY_ORIGIN}/v1/token`, iat: now, exp: now + ASSERTION_LIFETIME_SECONDS, jti: crypto.randomUUID() })}`;
+  const signature = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, new TextEncoder().encode(unsigned));
+  const form = new URLSearchParams({ grant_type: 'client_credentials', audience: cell.audience, scope: cell.scopes.join(' '), client_id: clientId,
+    client_assertion_type: 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer', client_assertion: `${unsigned}.${base64url(signature)}` });
+  const response = await fetcher(`${IDENTITY_ORIGIN}/v1/token`, { method: 'POST', redirect: 'manual', signal,
+    headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' }, body: form.toString() });
+  // Identity's error body is never read or returned: only that the exchange failed and its status.
+  if (!response.ok || !contentIsJson(response)) { await response.body?.cancel(); throw new TokenError(String(response.status)); }
+  const reply = JSON.parse(await boundedText(response.body, 16 * 1024)) as { access_token?: unknown; expires_in?: unknown };
+  if (typeof reply.access_token !== 'string' || !/^[\x21-\x7E]{16,8192}$/.test(reply.access_token) ||
+      typeof reply.expires_in !== 'number' || !(reply.expires_in > 0)) throw new TokenError(String(response.status));
+  platformTokens.set(`${clientId}|${cell.audience}`, { token: reply.access_token, expires: now + reply.expires_in });
+  return reply.access_token;
+}
+
 // Since 2026-11-03 the cells are reached through the edge gateway (platform-api-gateway SPEC-001):
 // a CELLS value may also be exactly GATEWAY_ORIGIN + "/v1/<system>". The gateway host and that
 // route shape are fixed here too, so configuration still cannot point the hub anywhere else.
@@ -369,17 +431,32 @@ async function callCell(input: CallInput, env: Env, cells: Cells, fetcher: Fetch
   for (const [key, value] of Object.entries(input.query ?? {})) target.searchParams.append(key, String(value));
   const body = input.body === undefined ? undefined : JSON.stringify(input.body);
   if (body !== undefined && new TextEncoder().encode(body).byteLength > CELL_BODY_LIMIT) return { cell, status: 'body_too_large' };
-  const token = env.EMPIRE_OWNER_MCP_TOKEN;
-  if (!token) return { cell, status: 'not_configured', missing: 'EMPIRE_OWNER_MCP_TOKEN' };
-  const headers: Record<string, string> = { Accept: 'application/json', Authorization: `Bearer ${token}`, 'X-Empire-Channel': CELL_CHANNEL };
-  if (body !== undefined) headers['Content-Type'] = 'application/json';
-  if (input.idempotency_key) headers['Idempotency-Key'] = input.idempotency_key;
-  if (input.if_match) headers['If-Match'] = input.if_match;
+  const platform = Object.hasOwn(PLATFORM_CELLS, cell) ? PLATFORM_CELLS[cell] : undefined;
+  let key: CryptoKey | null = null;
+  if (platform) {
+    if (!env.IDENTITY_CLIENT_PRIVATE_KEY_PEM) return { cell, status: 'not_configured', missing: 'IDENTITY_CLIENT_PRIVATE_KEY_PEM' };
+    if (!env.IDENTITY_CLIENT_ID || !/^[a-z][a-z0-9-]{2,62}$/.test(env.IDENTITY_CLIENT_ID)) return { cell, status: 'not_configured', missing: 'IDENTITY_CLIENT_ID' };
+    key = await signingKey(env.IDENTITY_CLIENT_PRIVATE_KEY_PEM);
+    if (!key) return { cell, status: 'not_configured', invalid: 'IDENTITY_CLIENT_PRIVATE_KEY_PEM' };
+  } else if (!env.EMPIRE_OWNER_MCP_TOKEN) return { cell, status: 'not_configured', missing: 'EMPIRE_OWNER_MCP_TOKEN' };
   const base = { cell, method: input.method, path };
   let signal: AbortSignal | undefined;
   try {
     return await withDeadline(async deadline => {
       signal = deadline;
+      let token = env.EMPIRE_OWNER_MCP_TOKEN!;
+      if (platform) {
+        try { token = await platformToken(platform, env.IDENTITY_CLIENT_ID!, key!, fetcher, deadline); }
+        catch (error) {
+          if (!(error instanceof TokenError) && !(error instanceof SyntaxError)) throw error;
+          return { ...base, status: 'token_error', ...(error instanceof TokenError ? { http_status: Number(error.message) } : {}) };
+        }
+        secrets = [...secrets, token];
+      }
+      const headers: Record<string, string> = { Accept: 'application/json', Authorization: `Bearer ${token}`, 'X-Empire-Channel': CELL_CHANNEL };
+      if (body !== undefined) headers['Content-Type'] = 'application/json';
+      if (input.idempotency_key) headers['Idempotency-Key'] = input.idempotency_key;
+      if (input.if_match) headers['If-Match'] = input.if_match;
       const response = await fetcher(target, { method: input.method, redirect: 'manual', signal: deadline, headers, body });
       const status = response.ok ? 'ok' : 'http_error';
       if (response.status === 204 || response.headers.get('content-length') === '0') {
@@ -405,7 +482,8 @@ function registerCellTools(server: McpServer, env: Env, fetcher: Fetcher, secret
   server.registerTool('list_cells', {
     description: 'แสดง Solo Empire cell API ที่ hub เรียกได้ (ชื่อ, host) และสถานะ token โดยไม่เปิดเผยค่า token', inputSchema: {}, annotations: hubAnnotations,
   }, async () => toolResult({ cells: names.map(name => ({ name, host: cellHost(cells.cells.get(name)!) })), config: cells.config,
-    rejected: cells.rejected, token_configured: Boolean(env.EMPIRE_OWNER_MCP_TOKEN), read_only: readOnly(env), channel: CELL_CHANNEL,
+    rejected: cells.rejected, token_configured: Boolean(env.EMPIRE_OWNER_MCP_TOKEN),
+    identity_client_configured: Boolean(env.IDENTITY_CLIENT_ID && env.IDENTITY_CLIENT_PRIVATE_KEY_PEM), read_only: readOnly(env), channel: CELL_CHANNEL,
     allowed_methods: readOnly(env) ? ['GET'] : [...CELL_METHODS] }));
   server.registerTool('describe_cell', {
     description: 'อ่าน /openapi.json ของ cell แล้วคืนรายการ operation แบบย่อ (method, path, summary, params, body schema) ที่ call_cell เรียกได้',
@@ -427,7 +505,7 @@ function registerCellTools(server: McpServer, env: Env, fetcher: Fetcher, secret
 }
 
 const errorStatuses = new Set(['not_configured', 'http_error', 'invalid_response', 'response_too_large', 'timeout', 'upstream_error',
-  'unknown_cell', 'method_not_allowed', 'read_only', 'invalid_path', 'invalid_request', 'body_too_large']);
+  'unknown_cell', 'method_not_allowed', 'read_only', 'invalid_path', 'invalid_request', 'body_too_large', 'token_error']);
 function toolResult(result: Result) {
   return { content: [{ type: 'text' as const, text: JSON.stringify(result) }], structuredContent: result,
     ...(errorStatuses.has(String(result.status)) ? { isError: true } : {}) };
@@ -436,7 +514,7 @@ function toolResult(result: Result) {
 function serverFor(env: Env, fetcher: Fetcher): McpServer {
   const server = new McpServer({ name: 'solo-empire-mcp-remote', version: '1.0.0' });
   const configured = services(env);
-  const secrets = [env.MCP_TOKEN_SHA256, env.EMPIRE_OWNER_MCP_TOKEN, ...configured.map(service => service.token)].filter((value): value is string => Boolean(value));
+  const secrets = [env.MCP_TOKEN_SHA256, env.EMPIRE_OWNER_MCP_TOKEN, env.IDENTITY_CLIENT_PRIVATE_KEY_PEM, ...configured.map(service => service.token)].filter((value): value is string => Boolean(value));
   server.registerTool('list_remote_services', {
     description: 'แสดงบริการ API ที่ตั้งค่าไว้ โดยไม่เปิดเผย token; การตั้งค่าไม่ยืนยันว่าบริการออนไลน์', inputSchema: {}, annotations,
   }, async () => toolResult({ services: configured.map(service => ({ id: service.id, origin: service.origin, origin_configured: Boolean(service.origin), read_token_configured: Boolean(service.token), availability: 'not_checked' })) }));

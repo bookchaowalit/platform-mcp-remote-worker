@@ -191,6 +191,8 @@ def worker_secrets() -> dict[str, str]:
         ("AI_API_READ_TOKEN", "AI_GATEWAY_API_READ_TOKEN", "/ai-gateway"),
         ("AGENCY_CRM_TOKEN", "CRM_API_TOKEN", "/crm"),
         ("INCOME_CRM_TOKEN", "CRM_API_TOKEN", "/income"),
+        # Identity service client mcp-hub: signs the client_credentials assertion for platform-* cells.
+        ("IDENTITY_CLIENT_PRIVATE_KEY_PEM", "IDENTITY_CLIENT_PRIVATE_KEY_PEM", "/mcp-hub"),
     ):
         value = resolve(key, path)
         if value:
