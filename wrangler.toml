@@ -16,8 +16,12 @@ ALLOWED_ORIGINS = ""
 # (gateway.bookchaowalit.com/v1/<system>, platform-api-gateway SPEC-001). A value must be that
 # exact form or a direct origin in CELL_HOSTS (src/worker.ts); others are rejected.
 # Rollback: put a cell's direct origin back here and redeploy.
+# platform-<svc> = Book Platform services; the hub calls them with an identity service-client
+# token (IDENTITY_CLIENT_ID var + IDENTITY_CLIENT_PRIVATE_KEY_PEM secret), not owner-mcp.
 # Client systems are not listed. Set MCP_READONLY = "1" to allow GET only.
 MCP_READONLY = ""
+# Identity service client registered in identity-api IDENTITY_SERVICE_CLIENTS_JSON (2026-11-03).
+IDENTITY_CLIENT_ID = "mcp-hub"
 CELLS = '''{
   "accounts": "https://gateway.bookchaowalit.com/v1/accounts",
   "automation": "https://gateway.bookchaowalit.com/v1/automation",
@@ -47,6 +51,14 @@ CELLS = '''{
   "tasks": "https://gateway.bookchaowalit.com/v1/empire-platform",
   "tax": "https://gateway.bookchaowalit.com/v1/tax",
   "time": "https://gateway.bookchaowalit.com/v1/time",
-  "transactions": "https://gateway.bookchaowalit.com/v1/transactions"
+  "transactions": "https://gateway.bookchaowalit.com/v1/transactions",
+  "platform-commerce": "https://gateway.bookchaowalit.com/v1/platform-commerce",
+  "platform-communication": "https://gateway.bookchaowalit.com/v1/platform-communication",
+  "platform-data": "https://gateway.bookchaowalit.com/v1/platform-data",
+  "platform-developer": "https://gateway.bookchaowalit.com/v1/platform-developer",
+  "platform-logistics": "https://gateway.bookchaowalit.com/v1/platform-logistics",
+  "platform-media": "https://gateway.bookchaowalit.com/v1/platform-media",
+  "platform-security": "https://gateway.bookchaowalit.com/v1/platform-security",
+  "platform-workflow": "https://gateway.bookchaowalit.com/v1/platform-workflow"
 }
 '''
