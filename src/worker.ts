@@ -146,20 +146,24 @@ export const CELL_HOSTS: readonly string[] = [
   'data-api-production-bf8a.up.railway.app', 'developer-api-production-2fad.up.railway.app',
   'logistics-api-production-d3bb.up.railway.app', 'media-api-production-91a5.up.railway.app',
   'security-api-production-f817.up.railway.app', 'workflow-api-production-63de.up.railway.app',
+  'payment-api-production-3a91.up.railway.app',
 ];
 // Book Platform services trust only platform-identity tokens bound to their own audience
 // (owner-mcp tokens get 401). The hub is an identity service client (client_credentials with a
 // private_key_jwt assertion, platform-identity docs/SERVICE-CLIENTS.md) and asks, per audience,
 // for that service's owner scopes only. Machine scopes (jobs:work, quotas:reserve/settle) stay
-// with their workers, and audit:write with posture-monitor, so agents cannot forge audit events.
+// with their workers, audit:write with posture-monitor (agents cannot forge audit events), and
+// quota policy (quotas:write) with the owner. Identity allows at most 32 scopes per client.
 export const IDENTITY_ORIGIN = 'https://identity-api-production-fad1.up.railway.app';
 export const PLATFORM_CELLS: Readonly<Record<string, { audience: string; scopes: readonly string[] }>> = {
   'platform-commerce': { audience: 'commerce-api', scopes: ['catalog:read', 'catalog:write', 'cart:read', 'cart:write', 'orders:read', 'orders:write', 'promotions:read', 'promotions:write'] },
   'platform-communication': { audience: 'communication-api', scopes: ['messages:read', 'messages:write', 'opt-outs:write'] },
-  'platform-data': { audience: 'data-api', scopes: ['cache:read', 'cache:write', 'counters:write', 'documents:read', 'documents:write', 'quotas:write'] },
+  'platform-data': { audience: 'data-api', scopes: ['cache:read', 'cache:write', 'counters:write', 'documents:read', 'documents:write'] },
   'platform-developer': { audience: 'developer-api', scopes: ['flags:read', 'flags:write'] },
   'platform-logistics': { audience: 'logistics-api', scopes: ['rates:read', 'shipments:read', 'shipments:write', 'labels:write', 'tracking:write'] },
   'platform-media': { audience: 'media-api', scopes: ['files:read', 'files:write'] },
+  // Read only: checkouts, refunds and billing changes move money, so they stay out of agent reach.
+  'platform-payment': { audience: 'payment-api', scopes: ['payments:read', 'billing:read'] },
   'platform-security': { audience: 'security-api', scopes: ['audit:read', 'references:read', 'references:write'] },
   'platform-workflow': { audience: 'workflow-api', scopes: ['jobs:read', 'jobs:write'] },
 };

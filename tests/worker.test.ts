@@ -480,7 +480,7 @@ function claimsOf(jwt: string) {
 
 test('platform cells: one gateway route each, audiences distinct, owner scopes only, within identity limits', () => {
   assert.deepEqual(platformCells.sort(), ['platform-commerce', 'platform-communication', 'platform-data', 'platform-developer',
-    'platform-logistics', 'platform-media', 'platform-security', 'platform-workflow']);
+    'platform-logistics', 'platform-media', 'platform-payment', 'platform-security', 'platform-workflow']);
   for (const name of platformCells) assert.equal(wranglerCells[name], `${GATEWAY_ORIGIN}/v1/${name}`, name);
   const audiences = Object.values(PLATFORM_CELLS).map(cell => cell.audience);
   assert.equal(new Set(audiences).size, audiences.length);
@@ -490,6 +490,9 @@ test('platform cells: one gateway route each, audiences distinct, owner scopes o
   assert.ok(scopes.length <= 32);
   // Machine-only scopes stay with their workers; agents cannot forge audit events.
   for (const machine of ['jobs:work', 'quotas:reserve', 'quotas:settle', 'quotas:service', 'audit:write']) assert.equal(scopes.includes(machine), false, machine);
+  // Agents read payments only: no checkouts, refunds or quota policy changes through the hub.
+  for (const money of ['payments:write', 'payments:refund', 'billing:write', 'quotas:write']) assert.equal(scopes.includes(money), false, money);
+  assert.deepEqual(PLATFORM_CELLS['platform-payment'], { audience: 'payment-api', scopes: ['payments:read', 'billing:read'] });
 });
 
 test('platform call without an identity client answers not_configured and calls nothing', async () => {

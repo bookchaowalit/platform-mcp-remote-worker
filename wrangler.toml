@@ -58,6 +58,7 @@ CELLS = '''{
   "platform-developer": "https://gateway.bookchaowalit.com/v1/platform-developer",
   "platform-logistics": "https://gateway.bookchaowalit.com/v1/platform-logistics",
   "platform-media": "https://gateway.bookchaowalit.com/v1/platform-media",
+  "platform-payment": "https://gateway.bookchaowalit.com/v1/platform-payment",
   "platform-security": "https://gateway.bookchaowalit.com/v1/platform-security",
   "platform-workflow": "https://gateway.bookchaowalit.com/v1/platform-workflow"
 }

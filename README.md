@@ -52,13 +52,13 @@ Tool hub ทำให้ Claude/Codex บนเครื่องใดก็ไ
 `call_cell(cell, method, path, query?, body?, idempotency_key?, if_match?)`
 
 Book Platform services (`platform-commerce`, `platform-communication`, `platform-data`,
-`platform-developer`, `platform-logistics`, `platform-media`, `platform-security`,
-`platform-workflow`; เพิ่ม 2026-11-03) รับเฉพาะ token ของ platform-identity ที่ผูก audience
+`platform-developer`, `platform-logistics`, `platform-media`, `platform-payment` (อ่านอย่างเดียว),
+`platform-security`, `platform-workflow`; เพิ่ม 2026-11-03) รับเฉพาะ token ของ platform-identity ที่ผูก audience
 ของตัวเอง hub จึงเป็น identity service client `mcp-hub` (`client_credentials` +
 `private_key_jwt`, key ใน secret `IDENTITY_CLIENT_PRIVATE_KEY_PEM`, Infisical `/mcp-hub`)
 ขอ token ต่อ audience พร้อม scope ของเจ้าของสำหรับ service นั้น (`PLATFORM_CELLS` ใน
 `src/worker.ts`) และ cache ไว้จนใกล้หมดอายุ scope ของเครื่อง (`jobs:work`,
-`quotas:reserve`/`settle`) และ `audit:write` ไม่ได้ให้ hub
+`quotas:reserve`/`settle`), `quotas:write`, `audit:write` และ scope เขียนของ payment ไม่ได้ให้ hub
 
 รายชื่อ cell อยู่ใน `CELLS` ของ `wrangler.toml` (JSON ชื่อ → HTTPS base URL;
 27 cell ของเจ้าของ + `tasks` = tasks-api ของ platform-empire; ไม่มีระบบของลูกค้า
