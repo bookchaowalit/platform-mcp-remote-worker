@@ -101,8 +101,12 @@ class ConfigurationTests(unittest.TestCase):
 
         with patch.object(manage, "resolve", side_effect=secret):
             payload = manage.worker_secrets()
-        self.assertEqual(payload["IDENTITY_CLIENT_PRIVATE_KEY_PEM"], "unit-test-private-key-pem")
-        self.assertEqual(set(payload), {"MCP_TOKEN_SHA256", "IDENTITY_CLIENT_PRIVATE_KEY_PEM"})
+        self.assertEqual(
+            payload["IDENTITY_CLIENT_PRIVATE_KEY_PEM"], "unit-test-private-key-pem"
+        )
+        self.assertEqual(
+            set(payload), {"MCP_TOKEN_SHA256", "IDENTITY_CLIENT_PRIVATE_KEY_PEM"}
+        )
 
     def test_deploy_skips_owner_mcp_token_when_absent_and_never_prints_values(self):
         def secret(name, path, required=False):
