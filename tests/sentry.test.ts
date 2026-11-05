@@ -104,4 +104,14 @@ describe('scrubEvent', () => {
     const event = scrubEvent({ message: 'call api?token=secret&x=1 failed; are you sure? see item #5' });
     assert.equal(event.message, 'call api failed; are you sure? see item #5');
   });
+
+  it('strips quoted, parenthesised, punctuation-only and leading queries up to the next space', () => {
+    const event = scrubEvent({ message: '?key=secret at start; fetch("?token=secret") failed: api?token=(secret) and x?q=a\'secret\' (see /p?x=secret). Ref #access_token=secret ok' });
+    const glued = scrubEvent({ message: 'Failed https://example.com/api?token=(secret)' });
+    const punctuation = scrubEvent({ message: '/search?q=!!! and /api?password=secret!!! and /search#!!! and (/x?y=secret))' });
+    assert.equal(event.message, ' at start; fetch(") failed: api and x (see /p Ref  ok');
+    assert.equal(glued.message, 'Failed https://example.com/api');
+    assert.equal(punctuation.message, '/search and /api and /search and (/x)');
+    assert.ok(!/secret|!/.test(JSON.stringify([event, glued, punctuation])));
+  });
 });
