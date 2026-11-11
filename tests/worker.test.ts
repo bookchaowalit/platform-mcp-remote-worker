@@ -578,3 +578,34 @@ test('own cells keep the owner-mcp token and never ask identity', async () => {
   assert.equal(seen.length, 1);
   assert.equal(seen[0].headers.get('authorization'), `Bearer ${ownerToken}`);
 });
+
+test('CRM services can go through the edge gateway route; health then carries the bearer', async () => {
+  const config = { ...env, AGENCY_CRM_ORIGIN: 'https://gateway.bookchaowalit.com/v1/crm', INCOME_CRM_ORIGIN: 'https://gateway.bookchaowalit.com/v1/crm-income/',
+    AGENCY_CRM_TOKEN: 'agency-private-test-token', INCOME_CRM_TOKEN: 'income-private-test-token' };
+  const observed: { url: string; auth: string | null }[] = [];
+  const upstream: typeof fetch = async (input, init) => {
+    observed.push({ url: String(input), auth: new Headers(init?.headers).get('authorization') });
+    return Response.json({ ok: true });
+  };
+  for (const name of ['get_agency_workspace', 'get_income_workspace']) assert.equal((await call(name, config, upstream)).structuredContent?.status, 'ok');
+  await call('check_remote_services', config, upstream);
+  assert.deepEqual(observed.map(item => item.url), [
+    'https://gateway.bookchaowalit.com/v1/crm/api/v1/crm/agency/workspace',
+    'https://gateway.bookchaowalit.com/v1/crm-income/api/v1/crm/agency/workspace',
+    'https://api.bookchaowalit.com/healthz',
+    'https://gateway.bookchaowalit.com/v1/crm/health',
+    'https://gateway.bookchaowalit.com/v1/crm-income/health',
+  ]);
+  assert.deepEqual(observed.map(item => item.auth), ['Bearer agency-private-test-token', 'Bearer income-private-test-token', null,
+    'Bearer agency-private-test-token', 'Bearer income-private-test-token']);
+});
+
+test('CRM bases other than an origin or a gateway route are refused', async () => {
+  for (const origin of ['https://gateway.bookchaowalit.com/v1/crm/extra', 'https://gateway.bookchaowalit.com/api', 'http://gateway.bookchaowalit.com/v1/crm',
+    'https://gateway.bookchaowalit.com/v1/crm?x=1', 'https://elsewhere.example/v1/crm']) {
+    let calls = 0;
+    const result = await call('get_agency_workspace', { ...env, AGENCY_CRM_ORIGIN: origin, AGENCY_CRM_TOKEN: 't' }, async () => { calls += 1; return Response.json({}); });
+    assert.equal(result.structuredContent?.status, 'not_configured', origin);
+    assert.equal(calls, 0);
+  }
+});

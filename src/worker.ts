@@ -23,7 +23,7 @@ export interface Env {
 }
 
 type ServiceId = 'ai' | 'agency' | 'income';
-interface Service { id: ServiceId; origin: string | null; token?: string; healthPath: string; readPath: string }
+interface Service { id: ServiceId; origin: string | null; gateway?: boolean; token?: string; healthPath: string; readPath: string }
 type Result = Record<string, unknown>;
 type Fetcher = typeof fetch;
 const INPUT_LIMIT = 64 * 1024;
@@ -43,11 +43,31 @@ function httpsOrigin(value?: string): string | null {
   } catch { return null; }
 }
 
+// A CRM base may be a bare origin or exactly GATEWAY_ORIGIN + "/v1/<route>" (the edge gateway).
+// Behind the gateway every path needs the bearer, health included.
+const CRM_GATEWAY_ROUTE = /^\/v1\/[a-z][a-z0-9-]{1,62}\/?$/;
+function httpsBase(value?: string): { base: string; gateway: boolean } | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (url.search || url.hash || url.username || url.password) return null;
+    const route = url.pathname === '/' ? '' : url.pathname;
+    if (route && (!CRM_GATEWAY_ROUTE.test(route) || url.origin !== GATEWAY_ORIGIN)) return null;
+    const origin = httpsOrigin(url.origin);
+    return origin ? { base: origin + route.replace(/\/$/, ''), gateway: Boolean(route) } : null;
+  } catch { return null; }
+}
+
+function crm(id: 'agency' | 'income', value: string, token?: string): Service {
+  const base = httpsBase(value);
+  return { id, origin: base?.base ?? null, gateway: base?.gateway ?? false, token, healthPath: '/health', readPath: '/api/v1/crm/agency/workspace' };
+}
+
 function services(env: Env): Service[] {
   return [
     { id: 'ai', origin: httpsOrigin(env.AI_API_ORIGIN ?? 'https://api.bookchaowalit.com'), token: env.AI_API_READ_TOKEN, healthPath: '/healthz', readPath: '/api/ai/status' },
-    { id: 'agency', origin: httpsOrigin(env.AGENCY_CRM_ORIGIN ?? 'https://crm-api-production-a7e0.up.railway.app'), token: env.AGENCY_CRM_TOKEN, healthPath: '/health', readPath: '/api/v1/crm/agency/workspace' },
-    { id: 'income', origin: httpsOrigin(env.INCOME_CRM_ORIGIN ?? 'https://crm-api-production-19fd.up.railway.app'), token: env.INCOME_CRM_TOKEN, healthPath: '/health', readPath: '/api/v1/crm/agency/workspace' },
+    crm('agency', env.AGENCY_CRM_ORIGIN ?? 'https://crm-api-production-a7e0.up.railway.app', env.AGENCY_CRM_TOKEN),
+    crm('income', env.INCOME_CRM_ORIGIN ?? 'https://crm-api-production-19fd.up.railway.app', env.INCOME_CRM_TOKEN),
   ];
 }
 
@@ -101,9 +121,10 @@ async function upstream(service: Service, read: boolean, fetcher: Fetcher, secre
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
   try {
-    const response = await fetcher(new URL(read ? service.readPath : service.healthPath, service.origin), {
+    const authorized = read || (service.gateway && service.token);
+    const response = await fetcher(new URL(service.origin + (read ? service.readPath : service.healthPath)), {
       method: 'GET', redirect: 'manual', signal: controller.signal,
-      headers: read ? { Accept: 'application/json', Authorization: `Bearer ${service.token}` } : { Accept: 'application/json' },
+      headers: authorized ? { Accept: 'application/json', Authorization: `Bearer ${service.token}` } : { Accept: 'application/json' },
     });
     if (!read || !response.ok) {
       await response.body?.cancel();
