@@ -144,6 +144,37 @@ class ConfigurationTests(unittest.TestCase):
         self.assertNotIn("unit-test", printed)
         self.assertEqual(json.loads(printed)["secret_names"], ["MCP_TOKEN_SHA256"])
 
+    def test_wrangler_toml_keeps_public_origin_for_plain_deploys(self):
+        data = tomllib.loads((MODULE.parent / "wrangler.toml").read_text())
+        origin = data["vars"]["PUBLIC_ORIGIN"]
+        self.assertRegex(
+            origin, r"^https://solo-empire-mcp-remote\.[a-z0-9-]+\.workers\.dev$"
+        )
+        package = json.loads((MODULE.parent / "package.json").read_text())
+        self.assertNotEqual(package["scripts"]["deploy"].strip(), "wrangler deploy")
+
+    def test_deploy_refuses_when_wrangler_toml_origin_differs(self):
+        runs = []
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / "wrangler.toml").write_text(
+                '[vars]\nPUBLIC_ORIGIN = "https://old.example.com"\n'
+            )
+            with (
+                patch.object(manage, "HERE", Path(directory)),
+                patch.object(
+                    manage, "public_origin", return_value="https://mcp.example.com"
+                ),
+                patch.object(manage, "worker_secrets", return_value={}),
+                patch.object(
+                    manage, "fixed_command", side_effect=lambda *a, **k: runs.append(a)
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError, "^wrangler_toml_public_origin_mismatch$"
+                ):
+                    manage.deploy()
+        self.assertEqual(runs, [])
+
     def test_provider_command_output_is_never_exposed_on_failure(self):
         failure = manage.subprocess.CompletedProcess(
             ["test"], 1, "private-value", "private-error"

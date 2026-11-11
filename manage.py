@@ -209,8 +209,21 @@ def worker_secrets() -> dict[str, str]:
     return values
 
 
+def configured_public_origin() -> str | None:
+    """PUBLIC_ORIGIN from wrangler.toml [vars], which a plain `wrangler deploy` keeps."""
+    try:
+        data = tomllib.loads((HERE / "wrangler.toml").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    value = data.get("vars", {}).get("PUBLIC_ORIGIN")
+    return value if isinstance(value, str) else None
+
+
 def deploy() -> None:
     endpoint = public_origin()
+    configured = configured_public_origin()
+    if configured is not None and configured != endpoint:
+        raise RuntimeError("wrangler_toml_public_origin_mismatch")
     values = worker_secrets()
     wrangler = HERE / "node_modules/wrangler/bin/wrangler.js"
     if not wrangler.exists():

@@ -37,8 +37,9 @@ messaging or AI generation.
 Cloudflare Workers, `wrangler.toml` at the repo root. CI (`.github/workflows/ci.yml`, shared
 `platform-ci-workflows`) runs tests, typecheck, a dry-run bundle and security scans, and never deploys. Deploys are
 manual: `python3 manage.py deploy` (code plus secrets from Infisical), or for a code-only change
-`wrangler deploy --var PUBLIC_ORIGIN:<origin>` with Cloudflare credentials from Infisical `/cloudflare`, which keeps
-the existing secrets. `python3 verify.py` runs the live smoke (unauthenticated `401`, then list and call tools,
+`wrangler deploy` with Cloudflare credentials from Infisical `/cloudflare`, which keeps
+the existing secrets. `PUBLIC_ORIGIN` is pinned in `wrangler.toml` [vars] since 2026-11-12, so a plain deploy no longer
+drops it (that caused 503 `not_configured` on 2026-11-03 and 2026-11-11); `manage.py deploy` refuses a mismatching value. `python3 verify.py` runs the live smoke (unauthenticated `401`, then list and call tools,
 printing metadata only). Rollback: `wrangler rollback <version-id>`.
 
 ## Limits and risks
