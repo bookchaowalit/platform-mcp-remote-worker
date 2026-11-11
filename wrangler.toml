@@ -12,8 +12,8 @@ workers_dev = true
 [vars]
 PUBLIC_ORIGIN = "https://solo-empire-mcp-remote.bookchaowalit.workers.dev"
 AI_API_ORIGIN = "https://api.bookchaowalit.com"
-AGENCY_CRM_ORIGIN = "https://gateway.bookchaowalit.com/v1/crm"  # edge gateway since 2026-11-12; rollback: https://crm-api-production-a7e0.up.railway.app
-INCOME_CRM_ORIGIN = "https://gateway.bookchaowalit.com/v1/crm-income"  # rollback: https://crm-api-production-19fd.up.railway.app
+AGENCY_CRM_ORIGIN = "https://crm-api-production-a7e0.up.railway.app"
+INCOME_CRM_ORIGIN = "https://crm-api-production-19fd.up.railway.app"
 ALLOWED_ORIGINS = ""
 # Tool hub: every own Solo Empire cell (tasks = platform-empire tasks-api, gateway route
 # empire-platform). Since 2026-11-03 every cell goes through the edge gateway
