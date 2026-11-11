@@ -89,7 +89,15 @@ class ConfigurationTests(unittest.TestCase):
             ("EMPIRE_AUTOMATION_TOKEN_OWNER_MCP", "/empire-platform"), requested
         )
         self.assertEqual(payload["EMPIRE_OWNER_MCP_TOKEN"], "unit-test-owner-mcp-jwt")
-        self.assertEqual(set(payload), {"MCP_TOKEN_SHA256", "EMPIRE_OWNER_MCP_TOKEN"})
+        # The CRM bindings carry the same token (the CRM accepts it; the gateway can verify it).
+        self.assertEqual(payload["AGENCY_CRM_TOKEN"], "unit-test-owner-mcp-jwt")
+        self.assertEqual(payload["INCOME_CRM_TOKEN"], "unit-test-owner-mcp-jwt")
+        self.assertEqual(
+            set(payload),
+            {"MCP_TOKEN_SHA256", "EMPIRE_OWNER_MCP_TOKEN", "AGENCY_CRM_TOKEN", "INCOME_CRM_TOKEN"},
+        )
+        self.assertNotIn(("CRM_API_TOKEN", "/crm"), requested)
+        self.assertNotIn(("CRM_API_TOKEN", "/income"), requested)
 
     def test_identity_client_key_is_forwarded_from_mcp_hub_folder(self):
         def secret(name, path, required=False):

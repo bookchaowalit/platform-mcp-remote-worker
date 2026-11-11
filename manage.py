@@ -189,8 +189,6 @@ def worker_secrets() -> dict[str, str]:
     values = {"MCP_TOKEN_SHA256": hashlib.sha256((token or "").encode()).hexdigest()}
     for binding, key, path in (
         ("AI_API_READ_TOKEN", "AI_GATEWAY_API_READ_TOKEN", "/ai-gateway"),
-        ("AGENCY_CRM_TOKEN", "CRM_API_TOKEN", "/crm"),
-        ("INCOME_CRM_TOKEN", "CRM_API_TOKEN", "/income"),
         # Identity service client mcp-hub: signs the client_credentials assertion for platform-* cells.
         (
             "IDENTITY_CLIENT_PRIVATE_KEY_PEM",
@@ -206,6 +204,11 @@ def worker_secrets() -> dict[str, str]:
     owner_mcp = resolve("EMPIRE_AUTOMATION_TOKEN_OWNER_MCP", "/empire-platform")
     if owner_mcp:
         values["EMPIRE_OWNER_MCP_TOKEN"] = owner_mcp
+        # Since 2026-11-12 both CRM instances accept the owner-mcp token (audiences crm-api and
+        # crm-income-api, crm-api CRM_API_JWT_SUBJECTS), which the gateway can verify; the rotation
+        # pushes the same copies. The static CRM tokens cannot pass the edge gateway.
+        values["AGENCY_CRM_TOKEN"] = owner_mcp
+        values["INCOME_CRM_TOKEN"] = owner_mcp
     return values
 
 
