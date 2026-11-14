@@ -18,7 +18,9 @@
   "overrides": {
     "undici": "7.30.1",
     "sharp": "0.35.5",
-    "ip-address": "10.7.4"
+    "ip-address": "10.7.4",
+    "hono": "4.13.16",
+    "@hono/node-server": "2.1.6"
   },
   "devDependencies": {
     "@types/node": "26.6.1",
