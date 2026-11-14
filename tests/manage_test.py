@@ -94,7 +94,12 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(payload["INCOME_CRM_TOKEN"], "unit-test-owner-mcp-jwt")
         self.assertEqual(
             set(payload),
-            {"MCP_TOKEN_SHA256", "EMPIRE_OWNER_MCP_TOKEN", "AGENCY_CRM_TOKEN", "INCOME_CRM_TOKEN"},
+            {
+                "MCP_TOKEN_SHA256",
+                "EMPIRE_OWNER_MCP_TOKEN",
+                "AGENCY_CRM_TOKEN",
+                "INCOME_CRM_TOKEN",
+            },
         )
         self.assertNotIn(("CRM_API_TOKEN", "/crm"), requested)
         self.assertNotIn(("CRM_API_TOKEN", "/income"), requested)
