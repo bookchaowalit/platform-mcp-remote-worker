@@ -479,8 +479,8 @@ function claimsOf(jwt: string) {
 }
 
 test('platform cells: one gateway route each, audiences distinct, owner scopes only, within identity limits', () => {
-  assert.deepEqual(platformCells.sort(), ['platform-commerce', 'platform-communication', 'platform-data', 'platform-developer',
-    'platform-logistics', 'platform-media', 'platform-payment', 'platform-security', 'platform-workflow']);
+  // media, data, workflow, commerce, logistics, developer archived 2026-11-18 (SCALE-READINESS D2).
+  assert.deepEqual(platformCells.sort(), ['platform-communication', 'platform-payment', 'platform-security']);
   for (const name of platformCells) assert.equal(wranglerCells[name], `${GATEWAY_ORIGIN}/v1/${name}`, name);
   const audiences = Object.values(PLATFORM_CELLS).map(cell => cell.audience);
   assert.equal(new Set(audiences).size, audiences.length);
@@ -498,7 +498,7 @@ test('platform cells: one gateway route each, audiences distinct, owner scopes o
 test('platform call without an identity client answers not_configured and calls nothing', async () => {
   resetPlatformTokens();
   const { seen, upstream } = platformRecorder();
-  const result = await invoke({ cell: 'platform-commerce', method: 'GET', path: '/v1/catalog/products' }, hub, upstream);
+  const result = await invoke({ cell: 'platform-security', method: 'GET', path: '/v1/references' }, hub, upstream);
   assert.equal(result.isError, true);
   assert.equal(result.structuredContent?.status, 'not_configured');
   assert.equal(result.structuredContent?.missing, 'IDENTITY_CLIENT_PRIVATE_KEY_PEM');
@@ -508,7 +508,7 @@ test('platform call without an identity client answers not_configured and calls 
 test('platform call gets an audience-bound identity token with a signed assertion, then calls the service with it', async () => {
   resetPlatformTokens();
   const { seen, upstream } = platformRecorder();
-  const result = await invoke({ cell: 'platform-commerce', method: 'GET', path: '/v1/catalog/products', query: { limit: 5 } }, platformHub, upstream);
+  const result = await invoke({ cell: 'platform-security', method: 'GET', path: '/v1/references', query: { limit: 5 } }, platformHub, upstream);
   assert.equal(result.structuredContent?.status, 'ok');
   assert.equal(seen.length, 2);
   const [tokenRequest, serviceRequest] = seen;
@@ -517,8 +517,8 @@ test('platform call gets an audience-bound identity token with a signed assertio
   assert.equal(tokenRequest.headers.get('content-type'), 'application/x-www-form-urlencoded');
   const form = new URLSearchParams(tokenRequest.body);
   assert.equal(form.get('grant_type'), 'client_credentials');
-  assert.equal(form.get('audience'), 'commerce-api');
-  assert.equal(form.get('scope'), PLATFORM_CELLS['platform-commerce'].scopes.join(' '));
+  assert.equal(form.get('audience'), 'security-api');
+  assert.equal(form.get('scope'), PLATFORM_CELLS['platform-security'].scopes.join(' '));
   assert.equal(form.get('client_id'), 'mcp-hub');
   assert.equal(form.get('client_assertion_type'), 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer');
   const { valid, header, claims } = claimsOf(form.get('client_assertion')!);
@@ -529,7 +529,7 @@ test('platform call gets an audience-bound identity token with a signed assertio
   assert.equal(claims.aud, `${IDENTITY_ORIGIN}/v1/token`);
   assert.ok(Number.isInteger(claims.iat) && claims.exp - claims.iat > 0 && claims.exp - claims.iat <= 300);
   assert.match(claims.jti, /^[0-9a-f-]{36}$/);
-  assert.equal(serviceRequest.url, `${GATEWAY_ORIGIN}/v1/platform-commerce/v1/catalog/products?limit=5`);
+  assert.equal(serviceRequest.url, `${GATEWAY_ORIGIN}/v1/platform-security/v1/references?limit=5`);
   assert.equal(serviceRequest.headers.get('authorization'), `Bearer ${platformToken}`);
   assert.equal(serviceRequest.headers.get('x-empire-channel'), 'mcp');
   const serialized = JSON.stringify(result);
@@ -539,15 +539,15 @@ test('platform call gets an audience-bound identity token with a signed assertio
 test('platform tokens are cached per audience until shortly before they expire', async () => {
   resetPlatformTokens();
   const { seen, upstream } = platformRecorder();
-  await invoke({ cell: 'platform-commerce', method: 'GET', path: '/v1/catalog/products' }, platformHub, upstream);
-  await invoke({ cell: 'platform-commerce', method: 'GET', path: '/v1/orders' }, platformHub, upstream);
-  await invoke({ cell: 'platform-media', method: 'GET', path: '/v1/files' }, platformHub, upstream);
+  await invoke({ cell: 'platform-security', method: 'GET', path: '/v1/references' }, platformHub, upstream);
+  await invoke({ cell: 'platform-security', method: 'GET', path: '/v1/audit' }, platformHub, upstream);
+  await invoke({ cell: 'platform-communication', method: 'GET', path: '/v1/messages' }, platformHub, upstream);
   const tokenRequests = seen.filter(sent => sent.url === `${IDENTITY_ORIGIN}/v1/token`);
-  assert.deepEqual(tokenRequests.map(sent => new URLSearchParams(sent.body).get('audience')), ['commerce-api', 'media-api']);
+  assert.deepEqual(tokenRequests.map(sent => new URLSearchParams(sent.body).get('audience')), ['security-api', 'communication-api']);
   resetPlatformTokens();
   const short = platformRecorder(() => Response.json({ access_token: platformToken, token_type: 'Bearer', expires_in: 20 }));
-  await invoke({ cell: 'platform-media', method: 'GET', path: '/v1/files' }, platformHub, short.upstream);
-  await invoke({ cell: 'platform-media', method: 'GET', path: '/v1/files' }, platformHub, short.upstream);
+  await invoke({ cell: 'platform-communication', method: 'GET', path: '/v1/messages' }, platformHub, short.upstream);
+  await invoke({ cell: 'platform-communication', method: 'GET', path: '/v1/messages' }, platformHub, short.upstream);
   assert.equal(short.seen.filter(sent => sent.url === `${IDENTITY_ORIGIN}/v1/token`).length, 2);
 });
 
@@ -559,14 +559,14 @@ test('identity refusals and malformed token replies stop before the service and 
   ]) {
     resetPlatformTokens();
     const { seen, upstream } = platformRecorder(reply);
-    const result = await invoke({ cell: 'platform-data', method: 'GET', path: '/v1/documents' }, platformHub, upstream);
+    const result = await invoke({ cell: 'platform-payment', method: 'GET', path: '/v1/payment-intents' }, platformHub, upstream);
     assert.equal(result.isError, true);
     assert.equal(result.structuredContent?.status, 'token_error');
     assert.equal(seen.length, 1);
     assert.equal(JSON.stringify(result).includes('private detail'), false);
   }
   resetPlatformTokens();
-  const bad = await invoke({ cell: 'platform-data', method: 'GET', path: '/v1/documents' },
+  const bad = await invoke({ cell: 'platform-payment', method: 'GET', path: '/v1/payment-intents' },
     { ...platformHub, IDENTITY_CLIENT_PRIVATE_KEY_PEM: '-----BEGIN RSA PRIVATE KEY-----\nAAAA\n-----END RSA PRIVATE KEY-----' }, platformRecorder().upstream);
   assert.equal(bad.structuredContent?.status, 'not_configured');
 });

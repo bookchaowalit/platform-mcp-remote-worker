@@ -163,10 +163,8 @@ export const CELL_HOSTS: readonly string[] = [
   'tasks-api-production-4785.up.railway.app', 'tax-api-production-57f6.up.railway.app',
   'time-api-production-2050.up.railway.app', 'transactions-api-production-4078.up.railway.app',
   // Book Platform services (bookchaowalit-backend/platform-<svc>, live 2026-10-29 / security 2026-11-02).
-  'commerce-api-production-9b24.up.railway.app', 'communication-api-production.up.railway.app',
-  'data-api-production-bf8a.up.railway.app', 'developer-api-production-2fad.up.railway.app',
-  'logistics-api-production-d3bb.up.railway.app', 'media-api-production-91a5.up.railway.app',
-  'security-api-production-f817.up.railway.app', 'workflow-api-production-63de.up.railway.app',
+  // media, data, workflow, commerce, logistics, developer archived 2026-11-18 (SCALE-READINESS D2).
+  'communication-api-production.up.railway.app', 'security-api-production-f817.up.railway.app',
   'payment-api-production-3a91.up.railway.app',
 ];
 // Book Platform services trust only platform-identity tokens bound to their own audience
@@ -177,16 +175,10 @@ export const CELL_HOSTS: readonly string[] = [
 // quota policy (quotas:write) with the owner. Identity allows at most 32 scopes per client.
 export const IDENTITY_ORIGIN = 'https://identity-api-production-fad1.up.railway.app';
 export const PLATFORM_CELLS: Readonly<Record<string, { audience: string; scopes: readonly string[] }>> = {
-  'platform-commerce': { audience: 'commerce-api', scopes: ['catalog:read', 'catalog:write', 'cart:read', 'cart:write', 'orders:read', 'orders:write', 'promotions:read', 'promotions:write'] },
   'platform-communication': { audience: 'communication-api', scopes: ['messages:read', 'messages:write', 'opt-outs:write'] },
-  'platform-data': { audience: 'data-api', scopes: ['cache:read', 'cache:write', 'counters:write', 'documents:read', 'documents:write'] },
-  'platform-developer': { audience: 'developer-api', scopes: ['flags:read', 'flags:write'] },
-  'platform-logistics': { audience: 'logistics-api', scopes: ['rates:read', 'shipments:read', 'shipments:write', 'labels:write', 'tracking:write'] },
-  'platform-media': { audience: 'media-api', scopes: ['files:read', 'files:write'] },
   // Read only: checkouts, refunds and billing changes move money, so they stay out of agent reach.
   'platform-payment': { audience: 'payment-api', scopes: ['payments:read', 'billing:read'] },
   'platform-security': { audience: 'security-api', scopes: ['audit:read', 'references:read', 'references:write'] },
-  'platform-workflow': { audience: 'workflow-api', scopes: ['jobs:read', 'jobs:write'] },
 };
 const ASSERTION_LIFETIME_SECONDS = 60;
 // Refresh this long before expiry, so a token never runs out during a call.
