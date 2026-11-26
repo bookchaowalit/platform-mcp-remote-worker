@@ -32,4 +32,4 @@ jobs:
       test-command: python -m unittest discover -s tests -p "*_test.py"
 
   security:
-    uses: bookchaowalit/platform-ci-workflows/.github/workflows/security.yml@c37ef9d113eefb3ed45429717cb7ca201192c3fc # v1.0.1
+    uses: bookchaowalit/platform-ci-workflows/.github/workflows/security.yml@493a7f5c322219e61245cf17f1fa34de2c35a22b # v1.6.6
