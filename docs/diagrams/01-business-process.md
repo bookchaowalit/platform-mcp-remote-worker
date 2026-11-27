@@ -1,4 +1,8 @@
-# 01 — Business process
+# 01 — Business process (As-Is / To-Be)
+
+platform-mcp-remote-worker คือ Cloudflare Worker (`solo-empire-mcp-remote`) ที่เป็น MCP endpoint เดียวแบบ HTTPS ให้ agent ของ owner เรียก cell API ทุกตัวผ่าน `list_cells` → `describe_cell` → `call_cell` ด้วย bearer token เดียว โดย cell ตัดสินสิทธิ์สุดท้าย
+
+Last reviewed: 2026-11-27 · commit `a0050cf`
 
 ## As-Is (จากโค้ดวันนี้)
 
@@ -32,14 +36,20 @@ tool แบบ fixed path (`check_remote_services`, `get_ai_status`, `get_agency
 
 ## To-Be
 
-repo ไม่มี `specs/` หรือ `docs/UPGRADE-PLAN.md` สิ่งที่เขียนไว้เป็นทิศทางใน repo docs มีเท่านั้น:
+ไม่มี To-Be ที่เขียนไว้ (repo ไม่มี `specs/`, `docs/UPGRADE-PLAN.md` หรือ ADR ที่ระบุเป้าหมายกระบวนการ; `PRODUCT.md` "Limits and risks" ระบุความเสี่ยงที่ยังไม่ได้ตัดสิน ไม่ใช่เป้าหมาย)
 
-- PRODUCT.md "Limits and risks": ยังไม่มี continuous uptime monitoring ที่บันทึกใน repo, Sentry ปิดจนกว่าจะตั้ง `SENTRY_DSN`
-- DOCPACK/00-product-card.md ขั้นต่อไป: รัน `verify.py` / `smoke.mjs` ใหม่หลังย้าย cell
+Sources: `PRODUCT.md`, `DOCPACK/00-product-card.md`
 
-Sources: PRODUCT.md, DOCPACK/00-product-card.md
+## Gap
+
+| ID | As-Is → To-Be | Status | Owner | Evidence |
+|---|---|---|---|---|
+| G1 | ไม่มี To-Be เขียนไว้ → owner กำหนดเป้าหมายของ tool hub | decide | owner | ขอให้ owner เขียน To-Be (spec หรือ section ใน `PRODUCT.md`) |
+| G2 | shared bearer token เดียว → per-client token หรือ OAuth (ยังไม่ตัดสิน) | decide | owner | `PRODUCT.md` (Limits and risks) |
+| G3 | `MCP_READONLY` ปิดเป็นค่าเริ่มต้น (`call_cell` เขียนได้) → เปิดเป็นค่าเริ่มต้นหรือไม่ | decide | owner | `PRODUCT.md` (Limits and risks); `src/worker.ts` `readOnly()` |
+| G4 | ไม่มี uptime monitoring ต่อเนื่อง ตรวจเอง → monitoring ที่บันทึกใน repo | decide | owner | `PRODUCT.md` (Limits and risks) |
 
 ## Open questions
 
-- To-Be process ไม่ได้นิยามไว้ใน repo: จะเปลี่ยนจาก shared bearer token เดียวเป็น per-client token/OAuth หรือไม่?
-- `MCP_READONLY` ควรเปิดเป็นค่าเริ่มต้นหรือไม่ (PRODUCT.md ระบุเป็น risk แต่ไม่มีการตัดสินใจ)
+- Sentry ยังปิดจนกว่า owner ตั้ง `SENTRY_DSN` ต้องการเปิดหรือไม่
+- DOCPACK/00-product-card.md (2026-10-11) ล้าสมัยกว่า `PRODUCT.md` เช่นยังบอกว่าไม่มี CI [ต้องยืนยัน] ว่าจะ refresh หรือไม่
